@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.30
+// @version      1.31
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.30";
+  var VERSION = "1.31";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -1181,6 +1181,19 @@ function reporter() {
       return t;
     }).sort(function (a, b) { return (a.busy - b.busy) || ((b.ratio || 0) - (a.ratio || 0)); });
   }
+  // The planner's view settings, s.planView = {show: "all" | "ready" | "busy", sort: "best" | "win" | "free"}.
+  // best: ready targets first, then by win chance · win: win chance only · free: soonest attackable first (ready ones at the top).
+  function planView(s) {
+    var v = s.planView || {};
+    return { show: v.show === "ready" || v.show === "busy" ? v.show : "all", sort: v.sort === "win" || v.sort === "free" ? v.sort : "best" };
+  }
+  function plannerRows(s) {
+    var v = planView(s), freeKey = function (t) { return !t.busy ? 0 : t.freeAt || Infinity; };
+    var list = targets(s).filter(function (t) { return v.show === "all" || (v.show === "ready") === !t.busy; });
+    if (v.sort === "win") { list.sort(function (a, b) { return (b.ratio || 0) - (a.ratio || 0); }); }
+    if (v.sort === "free") { list.sort(function (a, b) { return freeKey(a) - freeKey(b) || (b.ratio || 0) - (a.ratio || 0); }); }
+    return list;
+  }
   // "in 3h 20m (21:40)"
   function inTime(t) {
     var m = Math.max(0, Math.round((t - Date.now()) / 60000));
@@ -2051,9 +2064,16 @@ function reporter() {
     if (scanning && scanning.running) { h += "<div class='st wait'>" + esc(scanning.step) + "</div>"; }
     else if (scanning && scanning.error) { h += "<div class='st bad'>Scan failed: " + esc(scanning.error) + ".</div>"; }
     if (sc) {
+      var v = planView(s), all = targets(s), ready = all.filter(function (t) { return !t.busy; }).length, rows = plannerRows(s);
+      h += "<div class='row filters'><span class='seg'>" + [["all", "All", all.length], ["ready", "Ready", ready], ["busy", "Not ready", all.length - ready]].map(function (o) {
+        return "<button type='button' data-pshow='" + o[0] + "' class='" + (v.show === o[0] ? "on" : "") + "'>" + o[1] + " (" + o[2] + ")</button>";
+      }).join("") + "</span><span class='seg'>" + [["best", "Best target"], ["win", "Win %"], ["free", "Free soonest"]].map(function (o) {
+        return "<button type='button' data-psort='" + o[0] + "' class='" + (v.sort === o[0] ? "on" : "") + "'>" + o[1] + "</button>";
+      }).join("") + "</span></div>";
       h += "<table><thead><tr><th>#</th><th>Family</th><th>Lv</th><th title='Members'>Mem</th><th title='Average member level'>Avg</th><th title='Average level of their top 5'>Top 5</th><th>Honor</th>"
         + "<th title='Win chance. A rough guess from levels until " + LEARN_MIN + " of our wars are logged, then learned from our results.'>Win %</th></tr></thead><tbody>";
-      targets(s).forEach(function (t) {
+      if (!rows.length) { h += "<tr><td colspan='8' style='text-align:center'>No families " + (v.show === "ready" ? "ready to attack right now." : "under attack right now.") + "</td></tr>"; }
+      rows.forEach(function (t) {
         var c = t.ratio ? chance(s, t.ratio) : null, r = t.ratio ? rating(t.ratio, c) : ["⚪", "?"];
         var by = (t.attackedBy || []).join(", "), on = (t.attackingOn || []).join(", ");
         var byText = by && by !== "?" ? " by " + esc(by) : "";
@@ -2189,6 +2209,11 @@ function reporter() {
     if (t.hasAttribute("data-recruits")) { showRecruits = true; showPlanner = showRanks = false; redraw(); return; }
     if (t.hasAttribute("data-ranks")) { showRanks = true; showPlanner = showRecruits = false; redraw(); return; }
     if (t.hasAttribute("data-postranks")) { postRanks().then(function () { if (!fails.ranks) { alert("Posted to the leadership chat."); } }); return; }
+    if (t.hasAttribute("data-pshow") || t.hasAttribute("data-psort")) {
+      var pv = planView(s);
+      if (t.hasAttribute("data-pshow")) { pv.show = t.getAttribute("data-pshow"); } else { pv.sort = t.getAttribute("data-psort"); }
+      s.planView = pv; save(s); redraw(); return;
+    }
     if (t.hasAttribute("data-rinv")) { var ri = recruitFilter(s); ri.inv = t.getAttribute("data-rinv"); s.recruitFilter = ri; save(s); redraw(); return; }
     if (t.hasAttribute("data-rsort")) { var rs = recruitFilter(s); rs.sort = t.getAttribute("data-rsort"); s.recruitFilter = rs; save(s); redraw(); return; }
     if (t.hasAttribute("data-ratoggle")) { s.recruitAlert = s.recruitAlert === false; save(s); redraw(); return; }
