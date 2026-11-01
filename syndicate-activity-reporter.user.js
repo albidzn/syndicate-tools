@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.2.1
+// @version      2.3.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.2.1";
+  var VERSION = "2.3.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.3.0": [
+      "Activity tab: tags next to each name. The Discord icon shows who is linked (faded = not linked). The activity tag shows the last 7 days: 🔥 streak, active, mixed, inactive, 💤 idle or new. Hover a tag for details."
+    ],
     "2.2.1": [
       "War planner: no new attack can be armed while we already have one planned or armed. Cancel the armed one first to pick another family."
     ],
@@ -2090,6 +2093,9 @@ function reporter() {
     + "#ID .idle{font-size:11px;color:var(--muted);white-space:nowrap}#ID table.adv td{text-align:left}"
     + "#ID .links{margin-top:8px;padding:8px;border-radius:8px;background:var(--soft)}#ID .links .lk{display:grid;grid-template-columns:110px 1fr auto;gap:8px;align-items:center}#ID .links .lk button{padding:4px 8px}#ID .links input{margin:2px 0}#ID .links span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
     + "#ID .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:var(--strong);vertical-align:1px}#ID .dot.on{background:#6bb133}"
+    + "#ID .tags{float:right;display:inline-flex;align-items:center;gap:5px;margin-left:6px}#ID .dc{display:inline-flex;color:#8f9bff;cursor:help}#ID .dc.no{color:var(--muted);opacity:.35}"
+    + "#ID .tag{font-size:10px;line-height:1.5;padding:0 6px;border-radius:9px;white-space:nowrap;cursor:help}#ID .tag.good{background:rgba(107,177,51,.18);color:#93d36d}#ID .tag.mid{background:rgba(232,196,106,.16);color:#e8c46a}"
+    + "#ID .tag.bad{background:rgba(255,138,138,.16);color:#ff8a8a}#ID .tag.new{background:rgba(77,178,255,.18);color:#7cc4ff}"
     + "#ID .st{margin-top:8px;font-size:12px;color:var(--muted)}#ID .st.ok{color:#93d36d}#ID .st.bad{color:#ff8a8a}#ID .st.wait{color:#e8c46a}"
     + "#ID button{font:600 11px/1.3 system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;border-radius:6px;padding:6px 10px;cursor:pointer;border:1px solid var(--strong);background:transparent;color:var(--fg)}"
     + "#ID button:hover{border-color:var(--accent)}#ID button.go{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}#ID button:disabled{opacity:.45;cursor:default}"
@@ -2104,6 +2110,32 @@ function reporter() {
 
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]; }); }
   function apClass(v) { return v >= FULL ? "full" : v >= FULL / 2 ? "mid" : v > 0 ? "low" : "zero"; }
+  // Tags after a member's name in the Activity list: Discord link and how active they've been over the last week.
+  var TAG_DAYS = 7;
+  var DC_ICON = "<svg viewBox='0 0 24 18' width='14' height='11' aria-hidden='true'><path fill='currentColor' fill-rule='evenodd' d='M4.2 2.4C6 1.4 7.9.9 9.6.7l.6 1.3a17 17 0 0 1 3.6 0l.6-1.3c1.7.2 3.6.7 5.4 1.7 2.3 3.3 3.3 7 3 11.3a19 19 0 0 1-5.9 3l-1.3-2c.8-.3 1.5-.6 2.2-1.1-3.6 1.6-8 1.6-11.6 0 .7.5 1.4.8 2.2 1.1l-1.3 2a19 19 0 0 1-5.9-3c-.3-4.3.7-8 3-11.3ZM10.2 9.6a1.8 2 0 1 0-3.6 0a1.8 2 0 1 0 3.6 0ZM17.4 9.6a1.8 2 0 1 0-3.6 0a1.8 2 0 1 0 3.6 0Z'/></svg>";
+  function activityTag(s, m, mid) {
+    var idle = idleDays(s, m.id, mid), streak = fullStreak(s, m.id, mid), days = 0, full = 0;
+    if (idle >= 2) { return ["bad", "💤 " + idle + "d", idle + " days in a row with 0 points"]; }
+    if (streak >= 7) { return ["good", "🔥 " + streak + "d", "100+ points " + streak + " days in a row"]; }
+    for (var i = 1; i <= TAG_DAYS; i++) {
+      var r = s.hist && s.hist[dayKey(mid - i * DAY)];
+      if (r && r[m.id]) { days++; if (r[m.id].ap >= FULL) { full++; } }
+    }
+    var joined = m.joinedAt && Date.now() - m.joinedAt < TAG_DAYS * DAY ? Math.floor((Date.now() - m.joinedAt) / DAY) : -1;
+    if (days < 3) { return joined >= 0 ? ["new", "new", "Joined " + (joined ? joined + (joined === 1 ? " day" : " days") + " ago" : "today")] : null; } // too little history to judge
+    var tip = "100+ points on " + full + " of the last " + days + " days";
+    return full / days >= 0.7 ? ["good", "active", tip] : full / days >= 0.3 ? ["mid", "mixed", tip] : ["bad", "inactive", tip];
+  }
+  function memberTags(s, m, mid) {
+    var a = activityTag(s, m, mid), h = a ? "<span class='tag " + a[0] + "' title='" + a[2] + "'>" + a[1] + "</span>" : "";
+    // Only where members are linked at all (the PC with the Discord settings); elsewhere every icon would look unlinked.
+    // The icon goes last, so the icons line up in one column.
+    if (s.links && Object.keys(s.links).length) {
+      h += s.links[m.id] ? "<span class='dc' title='Discord linked: shout-outs ping them'>" + DC_ICON + "</span>"
+        : "<span class='dc no' title='Discord not linked (Discord settings → Link members to Discord)'>" + DC_ICON + "</span>";
+    }
+    return h ? "<span class='tags'>" + h + "</span>" : "";
+  }
   function untilReset() {
     var m = Math.max(0, Math.ceil((dayStart(Date.now()) + 864e5 - Date.now()) / 60000));
     return Math.floor(m / 60) + "h " + (m % 60) + "m";
@@ -2181,10 +2213,9 @@ function reporter() {
         + th("levels", "+Lv", "Levels gained today") + "</tr></thead><tbody>";
       var mid = dayStart(Date.now());
       list.forEach(function (m, i) {
-        var idle = idleDays(s, m.id, mid);
         html += "<tr><td>" + (i + 1) + "</td><td><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>"
           + (/^\d+$/.test(m.id) ? "<a class='who' href='/game/player/" + m.id + "' title='Open profile'>" + esc(m.name) + "</a>" : esc(m.name))
-          + (idle >= 2 ? " <span class='idle' title='" + idle + " days in a row with 0 points'>💤" + idle + "d</span>" : "") + "</td>"
+          + memberTags(s, m, mid) + "</td>"
           + "<td class='" + apClass(m.today) + "'>" + m.today + "</td><td class='" + apClass(m.yesterday) + "'>" + m.yesterday + "</td><td>" + m.level + "</td>"
           + "<td class='" + (m.levels > 0 ? "up" : "") + "'>" + (m.levels == null ? "" : m.levels > 0 ? "+" + m.levels : "–") + "</td></tr>";
       });
