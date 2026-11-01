@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.3.1
+// @version      2.4.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,13 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.3.1";
+  var VERSION = "2.4.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.4.0": [
+      "Activity tab: crosshair and shield next to each name show who is registered for our planned attack and defence, in the member's class colour (grey = not registered).",
+      "Activity tab: new \"war sign-ups\" box with how many members are registered for the attack and the defence. Hover it for details."
+    ],
     "2.3.1": [
       "Activity tags also use the game's own today/yesterday numbers, so they work before a week of history is saved. \"new\" only shows for members who joined in the last 2 days, and days at 50–99 points count half."
     ],
@@ -118,7 +122,7 @@ function reporter() {
       return {
         id: String(m.userId != null ? m.userId : m.name), name: String(m.name || "?"), level: +m.level || 0,
         yesterday: +m.yesterday || 0, today: +m.today || 0, gold: +m.donatedGold || 0, online: !!m.online, rank: m.rank || "",
-        joinedAt: m.joinedAt ? +new Date(m.joinedAt) || 0 : 0
+        joinedAt: m.joinedAt ? +new Date(m.joinedAt) || 0 : 0, spec: m.spec || ""
       };
     });
   }
@@ -2087,7 +2091,9 @@ function reporter() {
     + "#ID .free{display:inline-block;font-size:11px;color:var(--up);white-space:nowrap}#ID tr.off .free{opacity:1}#ID .free.now{color:#93d36d}#ID tr.off td:nth-child(2){opacity:1}#ID tr.off td:nth-child(2) > :not(.free){opacity:.45}"
     + "#ID .top{display:flex;align-items:center;gap:6px;cursor:move;user-select:none}#ID .grow{flex:1}"
     + "#ID .t{font:600 11px/1.3 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}"
-    + "#ID .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 8px}"
+    + "#ID .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 8px}#ID .stats.five{grid-template-columns:repeat(5,1fr);gap:5px}#ID .stats.five .stat{padding:6px 6px}#ID .stats.five .stat b{font-size:20px;white-space:nowrap}"
+    + "#ID .stat b.wk i{display:inline-flex;vertical-align:1px;margin-right:2px;opacity:.85}#ID .stat b.wk i svg{width:12px;height:12px}#ID .stat[title]{cursor:help}"
+    + "#ID .war{display:inline-flex;cursor:help}#ID .war.no{color:var(--muted);opacity:.35}"
     + "#ID .stat{background:var(--soft);border-radius:8px;padding:6px 8px}#ID .stat b{display:block;font:normal 22px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);letter-spacing:.02em}#ID .stat span{font-size:10.5px;color:var(--muted)}"
     + "#ID table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}"
     + "#ID th{font:600 10.5px/1.3 system-ui,sans-serif;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:2px solid var(--strong);white-space:nowrap}#ID th.on{color:var(--accent)}"
@@ -2137,8 +2143,31 @@ function reporter() {
     var tip = "Last " + (days === 1 ? "day" : days + " days") + (today ? " (today included)" : "") + ": " + full + " at 100+" + (half ? ", " + half + " at 50–99" : "");
     return score >= 0.7 ? ["good", "active", tip] : score >= 0.3 ? ["mid", "mixed", tip] : ["bad", "inactive", tip];
   }
-  function memberTags(s, m, mid) {
+  // War sign-ups, read the way the game's own member list shows its crosshair and shield: who is registered for a planned war we attack in / defend.
+  var SPEC_COLOR = { bully: "#f0852d", tactician: "#f2cf3a", rogue: "#3cc8dc" };
+  var ATK_ICON = "<svg viewBox='0 0 16 16' width='13' height='13' aria-hidden='true'><g fill='none' stroke='currentColor' stroke-width='1.8'><circle cx='8' cy='8' r='5.2'/><path d='M8 .8v4M8 11.2v4M.8 8h4M11.2 8h4'/></g></svg>";
+  var DEF_ICON = "<svg viewBox='0 0 16 16' width='12' height='13' aria-hidden='true'><path fill='currentColor' d='M8 .6 14.4 3v4.6c0 4-2.7 6.7-6.4 7.9C4.3 14.3 1.6 11.6 1.6 7.6V3Z'/></svg>";
+  function warSignups(fam) {
+    var o = { attack: null, defense: null };
+    warsOf(fam).forEach(function (w) {
+      var k = w.status !== "preparing" ? null : w.attackerId === fam.id ? "attack" : w.defenderId === fam.id ? "defense" : null;
+      if (!k) { return; }
+      var side = o[k] = o[k] || { foes: [], ids: {} };
+      side.foes.push(nameOf(k === "attack" ? w.defender : w.attacker));
+      (w.registeredUsers || []).forEach(function (id) { side.ids[String(id)] = true; });
+    });
+    return o;
+  }
+  function warIcons(su, m) {
+    return [["attack", ATK_ICON, "attack on"], ["defense", DEF_ICON, "defence against"]].map(function (k) {
+      var side = su[k[0]], on = side && side.ids[m.id], color = SPEC_COLOR[m.spec];
+      var tip = !side ? "No " + (k[0] === "attack" ? "attack" : "defence") + " planned" : (on ? "Registered for the " : "Not registered for the ") + k[2] + " " + side.foes.join(", ");
+      return "<span class='war" + (on ? "" : " no") + "'" + (on && color ? " style='color:" + color + "'" : "") + " title='" + esc(tip) + "'>" + k[1] + "</span>";
+    }).join("");
+  }
+  function memberTags(s, m, mid, su) {
     var a = activityTag(s, m, mid), h = a ? "<span class='tag " + a[0] + "' title='" + a[2] + "'>" + a[1] + "</span>" : "";
+    h += warIcons(su, m);
     // Only where members are linked at all (the PC with the Discord settings); elsewhere every icon would look unlinked.
     // The icon goes last, so the icons line up in one column.
     if (s.links && Object.keys(s.links).length) {
@@ -2212,10 +2241,16 @@ function reporter() {
     } else if (!last) {
       html += "<p>Waiting for the family list to load…</p>" + (diag ? "<p style='font-size:11px;color:var(--muted);word-break:break-all'>" + esc(diag) + "</p>" : "");
     } else {
-      html += "<div class='stats'>"
+      var su = warSignups(last.fam), signed = function (k) { var side = su[k]; return side ? list.filter(function (m) { return side.ids[m.id]; }).length : null; };
+      var nA = signed("attack"), nD = signed("defense");
+      var warTip = [["attack", nA, "Attack on"], ["defense", nD, "Defence against"]].map(function (k) {
+        return su[k[0]] ? k[2] + " " + su[k[0]].foes.join(", ") + ": " + k[1] + " of " + list.length + " registered" : "No " + (k[0] === "attack" ? "attack" : "defence") + " planned";
+      }).join("\n");
+      html += "<div class='stats five'>"
         + "<div class='stat'><b>" + full + "/" + list.length + "</b><span>at 100 today</span></div>"
         + "<div class='stat'><b>" + total.toLocaleString("en-US") + "</b><span>points today</span></div>"
         + "<div class='stat'><b>" + (start ? "+" + gained : "–") + "</b><span>levels today</span></div>"
+        + "<div class='stat' title='" + esc(warTip) + "'><b class='wk'><i>" + ATK_ICON + "</i>" + (nA == null ? "–" : nA) + " <i>" + DEF_ICON + "</i>" + (nD == null ? "–" : nD) + "</b><span>war sign-ups</span></div>"
         + "<div class='stat'><b>" + untilReset() + "</b><span>until reset</span></div></div>";
       var key = sortBy === "levels" ? function (m) { return m.levels || 0; } : function (m) { return m[sortBy]; };
       list.sort(function (a, b) { return key(b) - key(a) || b.today - a.today || b.level - a.level; });
@@ -2226,7 +2261,7 @@ function reporter() {
       list.forEach(function (m, i) {
         html += "<tr><td>" + (i + 1) + "</td><td><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>"
           + (/^\d+$/.test(m.id) ? "<a class='who' href='/game/player/" + m.id + "' title='Open profile'>" + esc(m.name) + "</a>" : esc(m.name))
-          + memberTags(s, m, mid) + "</td>"
+          + memberTags(s, m, mid, su) + "</td>"
           + "<td class='" + apClass(m.today) + "'>" + m.today + "</td><td class='" + apClass(m.yesterday) + "'>" + m.yesterday + "</td><td>" + m.level + "</td>"
           + "<td class='" + (m.levels > 0 ? "up" : "") + "'>" + (m.levels == null ? "" : m.levels > 0 ? "+" + m.levels : "–") + "</td></tr>";
       });
