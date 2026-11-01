@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.1.0
+// @version      2.2.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,13 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.1.0";
+  var VERSION = "2.2.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.2.0": [
+      "War planner: \"⏰ Attack when free\" on a family under attack declares war on them automatically the moment the game allows it (the game has to stay open on that PC). Armed attacks show on every tab and can be cancelled.",
+      "War planner: \"⚔️ Attack now\" on families that are ready."
+    ],
     "2.1.0": [
       "War attendance follows the game's 12-hour rule: a member only counts wars declared at least 12 hours after they joined. Past wars are recounted.",
       "Activity tab: click a member's name to open their profile, without a page reload.",
@@ -1862,6 +1866,83 @@ function reporter() {
     }).catch(function () {}).then(function () { attendFilling = false; redraw(); });
   }
 
+  // ===== Attack when free =====
+  // In the war planner, "Attack when free" on a family under attack arms an automatic war declaration, and "Attack now" on a
+  // ready one does the same at once. s.autoAttack = {id, name, freeAt, armedAt, why}. From shortly before their battle, the
+  // target's family page is loaded fresh every 15 seconds; as soon as the game says we may declare on them (its
+  // warDeclaration has no "blocked" reason), the same "declare" command as the Family tab's Attack button is sent.
+  // It gives up 30 minutes after the expected time, or if we have another attack planned by then. Only while the game is
+  // open on this PC, and only Godfathers and Counselors can declare.
+  var ATTACK_POLL = 15000, ATTACK_LEAD = 30000, ATTACK_GIVEUP = 30 * 60000, attackBusy = false, attackAt = 0, attackNote = "";
+  function canDeclare(p) { return !!p && (!p.rank || p.rank === "godfather" || p.rank === "counselor"); }
+  function ourAttack() { return last ? warsOf(last.fam).filter(function (w) { return w.status === "preparing" && w.attackerId === last.fam.id; })[0] : null; }
+  function familyFresh(id) {
+    return familyOptions().then(function (fo) {
+      if (!fo || !client) { throw new Error("open the Family tab once, then try again"); }
+      return client.fetchQuery(Object.assign({}, fo({ view: "home", familyId: id, search: "", page: 0 }), { staleTime: 0 }));
+    }).then(function (d) { return d && (d.family || d); });
+  }
+  function armAttack(id, now) {
+    var s = load(), t = targets(s).filter(function (x) { return String(x.id) === String(id); })[0];
+    if (!t) { return; }
+    var c = t.ratio ? chance(s, t.ratio) : null, old = s.autoAttack;
+    var q = (now ? "Declare war on " + t.name + " now?" : "Declare war on " + t.name + " automatically as soon as they can be attacked" + (t.freeAt ? " (expected " + clock(t.freeAt) + ")" : "") + "?")
+      + (c != null ? "\n\nWin chance ~" + c + "%." : "") + (old && !now ? "\n\nThis replaces the armed attack on " + old.name + "." : "")
+      + (now ? "" : "\n\nThe game has to stay open on this PC until then.");
+    if (!confirm(q)) { return; }
+    s.autoAttack = { id: t.id, name: t.name, freeAt: now ? Date.now() : t.freeAt || Date.now(), armedAt: Date.now(), chance: c };
+    save(s); attackAt = 0; attackNote = "";
+    if (!now && s.webhook) { postFor("autoattack", s.webhook, shout("⏰ **Auto-attack armed:** war on **" + md(t.name) + "** will be declared as soon as they're free" + (t.freeAt ? " (<t:" + Math.round(t.freeAt / 1000) + ":R>)" : "") + (c != null ? ", ~" + c + "% win chance" : "") + ".")); }
+    redraw();
+  }
+  function disarmAttack() {
+    var s = load(), a = s.autoAttack;
+    if (!a) { return; }
+    delete s.autoAttack; save(s); attackNote = "Auto-attack on " + a.name + " cancelled.";
+    if (s.webhook) { postFor("autoattack", s.webhook, shout("🛑 Auto-attack on **" + md(a.name) + "** was cancelled.")); }
+    redraw();
+  }
+  function finishAttack(ok, text) {
+    var s = load(), a = s.autoAttack;
+    if (!a) { return; }
+    delete s.autoAttack; save(s);
+    attackNote = (ok ? "✅ " : "⚠️ ") + text;
+    if (s.webhook) {
+      postFor("autoattack", s.webhook, shout(ok ? "⚔️ **Auto-attack:** war declared on **" + md(a.name) + "** at " + clock(Date.now()) + (a.chance != null ? " (~" + a.chance + "% win chance)" : "") + ". Register for the attack on the Family tab!"
+        : "⚠️ **Auto-attack on " + md(a.name) + " stopped:** " + text));
+    }
+    redraw();
+  }
+  function checkAutoAttack() {
+    var s = load(), a = s.autoAttack, now = Date.now();
+    if (!a || attackBusy || !last || !client || now < attackAt || now < a.freeAt - ATTACK_LEAD) { return; }
+    var ours = ourAttack();
+    if (ours && ours.defenderId !== a.id) { finishAttack(false, "we already have an attack planned on " + nameOf(ours.defender) + ", and only one at a time is allowed."); return; }
+    if (ours) { finishAttack(true, "war on " + a.name + " is planned."); return; } // declared already (by us or by hand)
+    if (now > a.freeAt + ATTACK_GIVEUP) { finishAttack(false, "still not attackable 30 minutes after the expected time" + (a.why ? " (the game said: " + a.why + ")" : "") + "."); return; }
+    attackBusy = true; attackAt = now + ATTACK_POLL;
+    var why = function (text) { var n = load(); if (n.autoAttack) { n.autoAttack.why = text; save(n); } };
+    familyFresh(a.id).then(function (f) {
+      var wd = f && f.warDeclaration;
+      if (!wd || wd.blocked) { why(wd ? String(wd.blocked) : "their family page didn't say"); return; }
+      return familyCommand().then(function (fn) {
+        return fn({ data: { requestId: crypto.randomUUID(), command: { action: "declare", familyId: last.fam.id, opponentId: a.id } } });
+      }).then(function () {
+        finishAttack(true, "war declared on " + a.name + " at " + clock(Date.now()) + ".");
+        refreshFamily();
+      }, function (e) { why(String(e && e.message || e)); }); // tried again in 15 seconds
+    }).catch(function (e) { why(String(e && e.message || e)); }).then(function () { attackBusy = false; redraw(); });
+  }
+  function attackStatus(s) {
+    var a = s.autoAttack;
+    if (a) {
+      return "<div class='st wait'>⏰ Auto-attack armed on <b>" + esc(a.name) + "</b>: "
+        + (Date.now() < a.freeAt - ATTACK_LEAD ? "declaring as soon as they're free, " + inTime(a.freeAt) : "trying now" + (a.why ? " (the game says: " + esc(a.why) + ")" : "") + "…")
+        + " <button type='button' data-disarm>Cancel</button></div>";
+    }
+    return attackNote ? "<div class='st " + (/^✅/.test(attackNote) ? "ok" : "") + "'>" + esc(attackNote) + "</div>" : "";
+  }
+
   // ===== Update notes =====
   // The first time a new version runs on a PC with the leadership webhook, it posts the CHANGES since the version that
   // ran before (s.lastVersion). Versions are major.minor.patch.
@@ -2071,7 +2152,7 @@ function reporter() {
     if (last) {
       html += "<div class='tabs'>" + [["activity", "data-home", "📊 Activity"], ["planner", "data-planner", "⚔️ War planner"], ["recruits", "data-recruits", "🧲 Recruits"], ["ranks", "data-ranks", "👑 Ranks"]].map(function (o) {
         return "<button type='button' " + o[1] + (view === o[0] ? " class='on'" : "") + ">" + o[2] + "</button>";
-      }).join("") + "</div>";
+      }).join("") + "</div>" + attackStatus(s); // an armed auto-attack shows on every tab
     }
     if (view === "recruits") {
       html += recruitHtml(s);
@@ -2111,7 +2192,7 @@ function reporter() {
       + (lvError ? "<div class='st bad'>Couldn't post a level milestone: " + esc(lvError) + ". Trying again in a few minutes.</div>" : "")
       + (apError ? "<div class='st bad'>Couldn't post an activity shout-out: " + esc(apError) + ". Trying again in a few minutes.</div>" : "")
       + Object.keys(fails).map(function (k) {
-        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
+        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", autoattack: "an auto-attack note", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
           + ": " + esc(fails[k]) + ". Trying again in a few minutes.</div>";
       }).join("")
       + (s.boardHook ? "<div class='st " + (boardError ? "bad" : "ok") + "'>" + (boardError ? "Couldn't update the leaderboard: " + esc(boardError) + "."
@@ -2160,6 +2241,7 @@ function reporter() {
       + "<div class='stat'><b>" + (sc ? "#" + sc.own : "–") + "</b><span>our rank" + (sc ? " (can attack " + Math.max(1, sc.own - WINDOW) + "–" + (sc.own + WINDOW) + ")" : "") + "</span></div></div>";
     var ours = warsOf(last.fam).filter(function (w) { return w.status === "preparing" && w.attackerId === last.fam.id; });
     if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ".</div>"; }
+    var armed = s.autoAttack, mayDeclare = canDeclare(last.fam.private);
     if (scanning && scanning.running) { h += "<div class='st wait'>" + esc(scanning.step) + "</div>"; }
     else if (scanning && scanning.error) { h += "<div class='st bad'>Scan failed: " + esc(scanning.error) + ".</div>"; }
     // Buttons above the list, so nothing needs scrolling down.
@@ -2184,7 +2266,10 @@ function reporter() {
           + (t.busy ? " <span class='idle' title='Already under attack" + byText + ": it can&#39;t be attacked until that battle is fought'>under attack" + byText + "</span>"
             + (t.freeAt ? " <span class='free'>⏳ free " + inTime(t.freeAt) + "</span>" : "")
             : t.attacked ? " <span class='free now'>✅ free since " + clock(t.freeAt) + "</span>"
-            : t.attacking ? " <span class='idle'>attacking" + (on && on !== "?" ? " " + esc(on) : "") + "</span>" : "") + "</td>"
+            : t.attacking ? " <span class='idle'>attacking" + (on && on !== "?" ? " " + esc(on) : "") + "</span>" : "")
+          + (!mayDeclare ? "" : armed && String(armed.id) === String(t.id) ? " <span class='free'>⏰ armed</span>"
+            : t.busy ? " <button type='button' class='inv' data-arm='" + esc(t.id) + "' title='Declare war on them automatically as soon as they can be attacked'>⏰ Attack when free</button>"
+            : !ours.length ? " <button type='button' class='inv' data-attacknow='" + esc(t.id) + "'>⚔️ Attack now</button>" : "") + "</td>"
           + "<td>" + (t.level || "?") + "</td><td>" + (t.members || "?") + "</td><td>" + (t.sum ? t.sum.avg : "?") + "</td><td>" + (t.sum ? t.sum.top5 : "?") + "</td>"
           + "<td>" + (t.honor || 0).toLocaleString("en-US") + "</td><td title='Their strength " + (t.sum ? t.sum.strength.toLocaleString("en-US") : "?") + (t.ratio ? ", we are " + t.ratio.toFixed(2) + "× as strong" : "") + "'>" + r[0] + " "
           + (c != null ? (learned(s) ? "" : "~") + c + "%" : "?") + "</td></tr>";
@@ -2310,6 +2395,9 @@ function reporter() {
     if (t.hasAttribute("data-recruits")) { showRecruits = true; showPlanner = showRanks = false; redraw(); return; }
     if (t.hasAttribute("data-ranks")) { showRanks = true; showPlanner = showRecruits = false; redraw(); return; }
     if (t.hasAttribute("data-postranks")) { postRanks().then(function () { if (!fails.ranks) { alert("Posted to the leadership chat."); } }); return; }
+    if (t.hasAttribute("data-arm")) { armAttack(t.getAttribute("data-arm"), false); return; }
+    if (t.hasAttribute("data-attacknow")) { armAttack(t.getAttribute("data-attacknow"), true); return; }
+    if (t.hasAttribute("data-disarm")) { if (confirm("Cancel the automatic attack?")) { disarmAttack(); } return; }
     if (t.hasAttribute("data-pshow") || t.hasAttribute("data-psort")) {
       var pv = planView(s);
       if (t.hasAttribute("data-pshow")) { pv.show = t.getAttribute("data-pshow"); } else { pv.sort = t.getAttribute("data-psort"); }
@@ -2423,6 +2511,7 @@ function reporter() {
     checkDonations();
     autoBackup();
     checkDebriefs();
+    checkAutoAttack();
     checkEvening();
     autoRecruits();
     checkRecord();
