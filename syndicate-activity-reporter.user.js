@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.26
+// @version      1.27
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.26";
+  var VERSION = "1.27";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -1295,12 +1295,18 @@ function reporter() {
     var days = (h.last.at - h.first.at) / DAY;
     return { lv: h.last.level - h.first.level, honor: h.last.honor - h.first.honor, days: days, perDay: days >= 0.5 ? ((h.last.level - h.first.level) + (h.last.honor - h.first.honor) / 100) / days : null };
   }
-  function recruitFilter(s) { var f = s.recruitFilter || {}; return { min: +f.min || 0, max: +f.max || 0, specs: f.specs || Object.keys(SPECS), sort: f.sort === "growth" ? "growth" : "level" }; }
-  function recruitList(s) {
-    var f = recruitFilter(s), once = {};
+  // inv: "all" · "open" (no open invitation) · "invited"
+  function recruitFilter(s) {
+    var f = s.recruitFilter || {};
+    return { min: +f.min || 0, max: +f.max || 0, specs: f.specs || Object.keys(SPECS), sort: f.sort === "growth" ? "growth" : "level", inv: f.inv === "open" || f.inv === "invited" ? f.inv : "all" };
+  }
+  // With anyInvite, the invitation filter is left out (for the counts on its buttons).
+  function recruitList(s, anyInvite) {
+    var f = recruitFilter(s), once = {}, news = !anyInvite && f.inv !== "all" ? newsInvites() : null;
     return ((s.recruits && s.recruits.list) || []).filter(function (p) {
       if (once[p.id]) { return false; } // lists saved by v1.15 can hold the same player twice
       once[p.id] = true;
+      if (news && !inviteOf(s, p, news) !== (f.inv === "open")) { return false; }
       return p.level >= f.min && (!f.max || p.level <= f.max) && (!p.spec || f.specs.indexOf(p.spec) >= 0);
     }).sort(function (a, b) {
       if (f.sort === "growth") {
@@ -1436,10 +1442,14 @@ function reporter() {
       + "<label>to <input type='number' min='0' data-rf='max' value='" + (f.max || "") + "' placeholder='max'></label><span class='seg'>"
       + Object.keys(SPECS).map(function (k) { return "<button type='button' data-spec='" + k + "' class='" + (f.specs.indexOf(k) >= 0 ? "on" : "") + "'>" + SPECS[k] + "</button>"; }).join("")
       + "</span><span class='seg'>" + [["level", "By level"], ["growth", "By growth"]].map(function (o) { return "<button type='button' data-rsort='" + o[0] + "' class='" + (f.sort === o[0] ? "on" : "") + "'>" + o[1] + "</button>"; }).join("")
-      + "</span></div>"
+      + "</span></div>";
+    var news = newsInvites(), every = recruitList(s, true), invited = every.filter(function (p) { return inviteOf(s, p, news); }).length;
+    h += "<div class='row filters'><span class='seg'>" + [["all", "All", every.length], ["open", "Not invited", every.length - invited], ["invited", "Invited", invited]].map(function (o) {
+      return "<button type='button' data-rinv='" + o[0] + "' class='" + (f.inv === o[0] ? "on" : "") + "'>" + o[1] + " (" + o[2] + ")</button>";
+    }).join("") + "</span></div>"
       + (s.webhook ? "<div class='row filters'><label>🔔 Alert the leadership chat about new searching players from level <input type='number' min='0' data-ra value='" + (s.recruitAlertMin || 0) + "'></label>"
         + "<button type='button' data-ratoggle>" + (s.recruitAlert === false ? "Alerts off" : "Alerts on") + "</button></div>" : "");
-    var news = newsInvites(), job = inviteJob, open = list.filter(function (p) { return !inviteOf(s, p, news); }).length;
+    var job = inviteJob, open = list.filter(function (p) { return !inviteOf(s, p, news); }).length;
     if (job && job.running) { h += "<div class='st wait'>Sending invitations… " + job.done + " of " + job.total + (job.current ? " · " + esc(job.current) : "") + " <button type='button' data-invstop>Stop</button></div>"; }
     else if (job && job.error) { h += "<div class='st bad'>" + esc(job.error) + "</div>"; }
     else if (job && job.msg) { h += "<div class='st'>" + esc(job.msg) + "</div>"; }
@@ -2136,6 +2146,7 @@ function reporter() {
     if (t.hasAttribute("data-recruits")) { showRecruits = true; showPlanner = showRanks = false; redraw(); return; }
     if (t.hasAttribute("data-ranks")) { showRanks = true; showPlanner = showRecruits = false; redraw(); return; }
     if (t.hasAttribute("data-postranks")) { postRanks().then(function () { if (!fails.ranks) { alert("Posted to the leadership chat."); } }); return; }
+    if (t.hasAttribute("data-rinv")) { var ri = recruitFilter(s); ri.inv = t.getAttribute("data-rinv"); s.recruitFilter = ri; save(s); redraw(); return; }
     if (t.hasAttribute("data-rsort")) { var rs = recruitFilter(s); rs.sort = t.getAttribute("data-rsort"); s.recruitFilter = rs; save(s); redraw(); return; }
     if (t.hasAttribute("data-ratoggle")) { s.recruitAlert = s.recruitAlert === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-rscan")) { runRecruitScan(); return; }
