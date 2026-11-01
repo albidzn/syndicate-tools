@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.27
+// @version      1.28
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.27";
+  var VERSION = "1.28";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -1368,8 +1368,18 @@ function reporter() {
     }).then(function () { markInvited(p); }, function (e) {
       var msg = String(e && e.message || e);
       if (/invit/i.test(msg) && /already|pending/i.test(msg)) { markInvited(p); return; } // invited before, by us or someone else
-      throw new Error(msg);
+      var err = new Error(msg);
+      // The list is from the last scan: since then the player may have joined a family or stopped searching.
+      // Those are dropped from the list and skipped; refusals about our own family (full, rank) stop Invite all.
+      if (/belongs to a family|already (in|has|joined) a family|already a member|not looking|no longer|not found|(doesn't|does not) exist/i.test(msg)) { dropRecruit(p); err.skip = true; }
+      throw err;
     });
+  }
+  function dropRecruit(p) {
+    var s = load();
+    if (!s.recruits || !s.recruits.list) { return; }
+    s.recruits.list = s.recruits.list.filter(function (x) { return x.id !== p.id; });
+    save(s);
   }
   function markInvited(p) {
     var s = load(), now = Date.now();
@@ -1407,16 +1417,17 @@ function reporter() {
     var p = recruitList(load()).filter(function (x) { return String(x.id) === id; })[0];
     if (!p || inviteBusy[id] || inviteJob && inviteJob.running) { return; }
     inviteBusy[id] = true; redraw();
-    sendInvite(p).then(refreshFamily, function (e) { alert("Couldn't invite " + p.name + ": " + (e && e.message || e)); })
+    sendInvite(p).then(refreshFamily, function (e) { alert("Couldn't invite " + p.name + ": " + (e && e.message || e) + (e && e.skip ? "\n\nThey're no longer searching, so they've been removed from the list." : "")); })
       .then(function () { delete inviteBusy[id]; redraw(); });
   }
-  // Invites everyone in the list as it's filtered now who has no open invite, one every 2 seconds. Stops at the first refusal.
+  // Invites everyone in the list as it's filtered now who has no open invite, one every 2 seconds. Players who have joined a
+  // family since the scan are skipped; any other refusal stops it.
   function inviteAll() {
     if (inviteJob && inviteJob.running) { return; }
     var s = load(), news = newsInvites(), todo = recruitList(s).filter(function (p) { return !inviteOf(s, p, news); });
     if (!todo.length) { alert("Everyone in this list already has an open invitation."); return; }
     if (!confirm("Send a family invitation to " + todo.length + " player" + (todo.length === 1 ? "" : "s") + " (the list as filtered now)?\n\nOne goes out every " + INVITE_GAP / 1000 + " seconds. You can stop any time.")) { return; }
-    var job = inviteJob = { running: true, done: 0, total: todo.length, current: "" };
+    var job = inviteJob = { running: true, done: 0, skipped: 0, total: todo.length, current: "" };
     redraw();
     todo.reduce(function (pr, p, i) {
       return pr.then(function () {
@@ -1424,14 +1435,17 @@ function reporter() {
         return wait(i ? INVITE_GAP : 0).then(function () {
           if (!job.running) { return; }
           job.current = p.name; redraw();
-          return sendInvite(p).then(function () { job.done++; });
+          return sendInvite(p).then(function () { job.done++; }, function (e) { if (e && e.skip) { job.skipped++; return; } throw e; });
         });
       });
     }, Promise.resolve()).then(function () {
-      job.msg = (job.running ? "Done: " : "Stopped: ") + job.done + " of " + job.total + " invitations sent.";
+      job.msg = (job.running ? "Done: " : "Stopped: ") + job.done + " of " + job.total + " invitations sent." + skippedNote(job);
     }, function (e) {
-      job.error = "Stopped after " + job.done + " of " + job.total + " invitations. The game said: " + (e && e.message || e);
+      job.error = "Stopped after " + job.done + " of " + job.total + " invitations." + skippedNote(job) + " The game said: " + (e && e.message || e);
     }).then(function () { job.running = false; job.current = ""; refreshFamily(); redraw(); });
+  }
+  function skippedNote(job) {
+    return job.skipped ? " " + job.skipped + " skipped: no longer searching (removed from the list)." : "";
   }
   function recruitHtml(s) {
     var r = s.recruits, f = recruitFilter(s), list = recruitList(s), h = "";
