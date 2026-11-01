@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.2.0
+// @version      2.2.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.2.0";
+  var VERSION = "2.2.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.2.1": [
+      "War planner: no new attack can be armed while we already have one planned or armed. Cancel the armed one first to pick another family."
+    ],
     "2.2.0": [
       "War planner: \"⏰ Attack when free\" on a family under attack declares war on them automatically the moment the game allows it (the game has to stay open on that PC). Armed attacks show on every tab and can be cancelled.",
       "War planner: \"⚔️ Attack now\" on families that are ready."
@@ -1885,9 +1888,12 @@ function reporter() {
   function armAttack(id, now) {
     var s = load(), t = targets(s).filter(function (x) { return String(x.id) === String(id); })[0];
     if (!t) { return; }
-    var c = t.ratio ? chance(s, t.ratio) : null, old = s.autoAttack;
+    var ours = ourAttack(); // the buttons are hidden then, this catches a panel that hadn't redrawn yet
+    if (ours) { alert("We already have an attack planned on " + nameOf(ours.defender) + ". The game allows one at a time."); redraw(); return; }
+    if (s.autoAttack) { alert("An attack on " + s.autoAttack.name + " is already armed. Cancel it first to pick another family."); redraw(); return; }
+    var c = t.ratio ? chance(s, t.ratio) : null;
     var q = (now ? "Declare war on " + t.name + " now?" : "Declare war on " + t.name + " automatically as soon as they can be attacked" + (t.freeAt ? " (expected " + clock(t.freeAt) + ")" : "") + "?")
-      + (c != null ? "\n\nWin chance ~" + c + "%." : "") + (old && !now ? "\n\nThis replaces the armed attack on " + old.name + "." : "")
+      + (c != null ? "\n\nWin chance ~" + c + "%." : "")
       + (now ? "" : "\n\nThe game has to stay open on this PC until then.");
     if (!confirm(q)) { return; }
     s.autoAttack = { id: t.id, name: t.name, freeAt: now ? Date.now() : t.freeAt || Date.now(), armedAt: Date.now(), chance: c };
@@ -1938,7 +1944,7 @@ function reporter() {
     if (a) {
       return "<div class='st wait'>⏰ Auto-attack armed on <b>" + esc(a.name) + "</b>: "
         + (Date.now() < a.freeAt - ATTACK_LEAD ? "declaring as soon as they're free, " + inTime(a.freeAt) : "trying now" + (a.why ? " (the game says: " + esc(a.why) + ")" : "") + "…")
-        + " <button type='button' data-disarm>Cancel</button></div>";
+        + " <button type='button' data-disarm>Cancel</button> <span class='idle'>Cancel it to pick another family.</span></div>";
     }
     return attackNote ? "<div class='st " + (/^✅/.test(attackNote) ? "ok" : "") + "'>" + esc(attackNote) + "</div>" : "";
   }
@@ -2240,7 +2246,7 @@ function reporter() {
       + "<div class='stat'><b>" + us.avg + "</b><span>avg member level</span></div>"
       + "<div class='stat'><b>" + (sc ? "#" + sc.own : "–") + "</b><span>our rank" + (sc ? " (can attack " + Math.max(1, sc.own - WINDOW) + "–" + (sc.own + WINDOW) + ")" : "") + "</span></div></div>";
     var ours = warsOf(last.fam).filter(function (w) { return w.status === "preparing" && w.attackerId === last.fam.id; });
-    if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ".</div>"; }
+    if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ". The next attack can be planned after that battle.</div>"; }
     var armed = s.autoAttack, mayDeclare = canDeclare(last.fam.private);
     if (scanning && scanning.running) { h += "<div class='st wait'>" + esc(scanning.step) + "</div>"; }
     else if (scanning && scanning.error) { h += "<div class='st bad'>Scan failed: " + esc(scanning.error) + ".</div>"; }
@@ -2268,8 +2274,9 @@ function reporter() {
             : t.attacked ? " <span class='free now'>✅ free since " + clock(t.freeAt) + "</span>"
             : t.attacking ? " <span class='idle'>attacking" + (on && on !== "?" ? " " + esc(on) : "") + "</span>" : "")
           + (!mayDeclare ? "" : armed && String(armed.id) === String(t.id) ? " <span class='free'>⏰ armed</span>"
+            : armed || ours.length ? "" // one attack at a time: the planned or armed one has to be fought or cancelled first
             : t.busy ? " <button type='button' class='inv' data-arm='" + esc(t.id) + "' title='Declare war on them automatically as soon as they can be attacked'>⏰ Attack when free</button>"
-            : !ours.length ? " <button type='button' class='inv' data-attacknow='" + esc(t.id) + "'>⚔️ Attack now</button>" : "") + "</td>"
+            : " <button type='button' class='inv' data-attacknow='" + esc(t.id) + "'>⚔️ Attack now</button>") + "</td>"
           + "<td>" + (t.level || "?") + "</td><td>" + (t.members || "?") + "</td><td>" + (t.sum ? t.sum.avg : "?") + "</td><td>" + (t.sum ? t.sum.top5 : "?") + "</td>"
           + "<td>" + (t.honor || 0).toLocaleString("en-US") + "</td><td title='Their strength " + (t.sum ? t.sum.strength.toLocaleString("en-US") : "?") + (t.ratio ? ", we are " + t.ratio.toFixed(2) + "× as strong" : "") + "'>" + r[0] + " "
           + (c != null ? (learned(s) ? "" : "~") + c + "%" : "?") + "</td></tr>";
