@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.3.0
+// @version      2.3.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.3.0";
+  var VERSION = "2.3.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.3.1": [
+      "Activity tags also use the game's own today/yesterday numbers, so they work before a week of history is saved. \"new\" only shows for members who joined in the last 2 days, and days at 50–99 points count half."
+    ],
     "2.3.0": [
       "Activity tab: tags next to each name. The Discord icon shows who is linked (faded = not linked). The activity tag shows the last 7 days: 🔥 streak, active, mixed, inactive, 💤 idle or new. Hover a tag for details."
     ],
@@ -2111,20 +2114,28 @@ function reporter() {
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]; }); }
   function apClass(v) { return v >= FULL ? "full" : v >= FULL / 2 ? "mid" : v > 0 ? "low" : "zero"; }
   // Tags after a member's name in the Activity list: Discord link and how active they've been over the last week.
-  var TAG_DAYS = 7;
+  var TAG_DAYS = 7, NEW_DAYS = 2; // members who joined less than NEW_DAYS ago are tagged "new" instead of judged
   var DC_ICON = "<svg viewBox='0 0 24 18' width='14' height='11' aria-hidden='true'><path fill='currentColor' fill-rule='evenodd' d='M4.2 2.4C6 1.4 7.9.9 9.6.7l.6 1.3a17 17 0 0 1 3.6 0l.6-1.3c1.7.2 3.6.7 5.4 1.7 2.3 3.3 3.3 7 3 11.3a19 19 0 0 1-5.9 3l-1.3-2c.8-.3 1.5-.6 2.2-1.1-3.6 1.6-8 1.6-11.6 0 .7.5 1.4.8 2.2 1.1l-1.3 2a19 19 0 0 1-5.9-3c-.3-4.3.7-8 3-11.3ZM10.2 9.6a1.8 2 0 1 0-3.6 0a1.8 2 0 1 0 3.6 0ZM17.4 9.6a1.8 2 0 1 0-3.6 0a1.8 2 0 1 0 3.6 0Z'/></svg>";
   function activityTag(s, m, mid) {
-    var idle = idleDays(s, m.id, mid), streak = fullStreak(s, m.id, mid), days = 0, full = 0;
+    var idle = idleDays(s, m.id, mid), streak = fullStreak(s, m.id, mid), days = 0, full = 0, half = 0;
     if (idle >= 2) { return ["bad", "💤 " + idle + "d", idle + " days in a row with 0 points"]; }
     if (streak >= 7) { return ["good", "🔥 " + streak + "d", "100+ points " + streak + " days in a row"]; }
+    // Finished days from the history. Yesterday also comes straight from the game, so this works before any history is saved.
+    // Days the member wasn't in the family for from the start don't count.
     for (var i = 1; i <= TAG_DAYS; i++) {
-      var r = s.hist && s.hist[dayKey(mid - i * DAY)];
-      if (r && r[m.id]) { days++; if (r[m.id].ap >= FULL) { full++; } }
+      var t = mid - i * DAY, r = s.hist && s.hist[dayKey(t)], ap = r && r[m.id] ? r[m.id].ap : i === 1 ? m.yesterday : null;
+      if (ap == null || m.joinedAt > t) { continue; }
+      days++; if (ap >= FULL) { full++; } else if (ap >= FULL / 2) { half++; }
     }
+    var today = m.today >= FULL; // today only counts once they've reached 100, the day isn't over yet
+    if (today) { days++; full++; }
     var joined = m.joinedAt && Date.now() - m.joinedAt < TAG_DAYS * DAY ? Math.floor((Date.now() - m.joinedAt) / DAY) : -1;
-    if (days < 3) { return joined >= 0 ? ["new", "new", "Joined " + (joined ? joined + (joined === 1 ? " day" : " days") + " ago" : "today")] : null; } // too little history to judge
-    var tip = "100+ points on " + full + " of the last " + days + " days";
-    return full / days >= 0.7 ? ["good", "active", tip] : full / days >= 0.3 ? ["mid", "mixed", tip] : ["bad", "inactive", tip];
+    if (joined >= 0 && (joined < NEW_DAYS || !days)) { return ["new", "new", "Joined " + (joined ? joined + (joined === 1 ? " day" : " days") + " ago" : "today")]; }
+    if (!days) { return null; }
+    // A day at 100+ counts fully, a day at 50–99 half.
+    var score = (full + half / 2) / days;
+    var tip = "Last " + (days === 1 ? "day" : days + " days") + (today ? " (today included)" : "") + ": " + full + " at 100+" + (half ? ", " + half + " at 50–99" : "");
+    return score >= 0.7 ? ["good", "active", tip] : score >= 0.3 ? ["mid", "mixed", tip] : ["bad", "inactive", tip];
   }
   function memberTags(s, m, mid) {
     var a = activityTag(s, m, mid), h = a ? "<span class='tag " + a[0] + "' title='" + a[2] + "'>" + a[1] + "</span>" : "";
