@@ -1,0 +1,914 @@
+<title>Mission Picker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: one summary verdict on top, three mission slips side by side below (stacked on phones). */
+:root {
+  --bg: #170c10;
+  --surface: #23131a;
+  --surface-2: #2d1820;
+  --line: #43252f;
+  --fg: #f4e7ea;
+  --muted: #b2939b;
+  --accent: #ff4b5c;
+  --xp: #f5a0b4;
+  --cash: #93d36d;
+  --gold: #f2c14e;
+  --gold-ink: #2a1a00;
+  --item: #49beec;
+  --item-ink: #06202b;
+  --font-display: "Oswald", "Arial Narrow", Impact, sans-serif;
+  --font-body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", "Courier New", ui-monospace, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f7efef; --surface: #ffffff; --surface-2: #fbf5f5; --line: #e6d3d7;
+    --fg: #2a1218; --muted: #7a5b63; --accent: #cf2638; --xp: #b9426f;
+    --cash: #3a8526; --gold: #b37e00; --gold-ink: #ffffff; --item: #1688b8; --item-ink: #ffffff; color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f7efef; --surface: #ffffff; --surface-2: #fbf5f5; --line: #e6d3d7;
+  --fg: #2a1218; --muted: #7a5b63; --accent: #cf2638; --xp: #b9426f;
+  --cash: #3a8526; --gold: #b37e00; --gold-ink: #ffffff; --item: #1688b8; --item-ink: #ffffff; color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.wrap {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 20px;
+}
+
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.1rem;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  margin: 0;
+  color: var(--accent);
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+.sub { margin: 6px 0 0; color: var(--muted); max-width: 60ch; }
+
+button {
+  font: 600 0.85rem var(--font-body);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Verdict */
+.verdict {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px 28px;
+}
+.label {
+  font: 600 0.72rem var(--font-body);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pick {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.4rem;
+  line-height: 1.05;
+  margin: 4px 0 6px;
+  overflow-wrap: anywhere;
+}
+.pick-why { color: var(--muted); margin: 0; }
+.leaders { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; font-size: 0.92rem; }
+.leaders b { font-weight: 600; }
+.leaders .k-xp { color: var(--xp); }
+.leaders .k-cash { color: var(--cash); }
+
+.weight { display: grid; gap: 10px; align-content: start; }
+.weight-row { display: flex; justify-content: space-between; font-family: var(--font-data); font-size: 0.9rem; }
+.weight-row .k-xp { color: var(--xp); }
+.weight-row .k-cash { color: var(--cash); }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Missions */
+.missions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.mission {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  position: relative;
+  transition: border-color .2s, box-shadow .2s;
+}
+.mission.is-best { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.mission-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 24px; }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.badge {
+  font: 600 0.68rem var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.badge.best { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); }
+.badge.xp { color: var(--xp); }
+.badge.cash { color: var(--cash); }
+
+.badge.item { color: var(--item); }
+.badge.item.rare {
+  color: var(--item-ink);
+  background: var(--item);
+  border-color: var(--item);
+  animation: itemGlow 1.6s ease-in-out infinite;
+}
+@keyframes itemGlow {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 9px 2px var(--item); }
+}
+.mission.has-item:not(.is-best) { border-color: var(--item); }
+.item-toggle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.9rem; color: var(--muted); cursor: pointer; }
+.item-toggle input { accent-color: var(--item); width: 16px; height: 16px; margin: 0; }
+.item-name { color: var(--item); font-weight: 600; }
+.field { display: grid; gap: 4px; }
+.field input {
+  width: 100%;
+  font: 600 1rem var(--font-data);
+  color: var(--fg);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-variant-numeric: tabular-nums;
+}
+.field input:focus { border-color: var(--accent); outline: none; }
+.field.name input { font-family: var(--font-display); font-weight: 500; font-size: 1.15rem; letter-spacing: 0.02em; }
+.nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+
+.results { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.stat { display: grid; gap: 4px; }
+.stat-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.stat-val { font: 600 1.2rem var(--font-data); font-variant-numeric: tabular-nums; }
+.stat.xp .stat-val { color: var(--xp); }
+.stat.cash .stat-val { color: var(--cash); }
+.bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; border-radius: 3px; transition: width .25s ease; }
+.stat.xp .bar i { background: var(--xp); }
+.stat.cash .bar i { background: var(--cash); }
+.score { display: flex; justify-content: space-between; align-items: baseline; }
+.score .stat-val { font-size: 1.5rem; }
+.mission.is-best .score .stat-val { color: var(--gold); }
+.hint { color: var(--muted); font-size: 0.85rem; margin: 0; }
+
+/* Import from game */
+.import {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 18px;
+}
+.import summary {
+  cursor: pointer;
+  font: 600 0.85rem var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.import h3 {
+  font: 600 1rem var(--font-display);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  margin: 18px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.import .tag {
+  font: 600 0.65rem var(--font-body);
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+}
+.import .intro { margin: 12px 0 0; max-width: 75ch; color: var(--muted); }
+.import .fallback { margin: 4px 0 0 1.3em; max-width: 75ch; }
+.import .fallback summary { font-size: 0.78rem; color: var(--muted); }
+ul.steps { list-style: disc; }
+.steps .bm { display: block; width: fit-content; margin: 10px 0 2px; padding: 8px 18px; font-size: 1rem; }
+.steps { margin: 14px 0 4px; padding-left: 1.3em; display: grid; gap: 12px; max-width: 75ch; }
+.steps li { padding-left: 4px; }
+.steps .hint { display: block; margin-top: 8px; }
+.bm {
+  display: inline-block;
+  margin: 2px 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: grab;
+}
+.code-row { display: flex; gap: 8px; margin-top: 6px; align-items: stretch; flex-wrap: wrap; }
+.code-row textarea {
+  flex: 1 1 260px;
+  min-width: 0;
+  font: 0.75rem var(--font-data);
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+kbd {
+  font: 600 0.8rem var(--font-data);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  background: var(--surface-2);
+}
+.status {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--cash);
+  color: var(--cash);
+  background: var(--surface);
+  font-weight: 600;
+}
+.status.err { border-color: var(--accent); color: var(--accent); }
+
+@media (max-width: 820px) {
+  .missions { grid-template-columns: minmax(0, 1fr); }
+  .verdict { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar i, .mission { transition: none; }
+  .badge.item { animation: none; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Mission Picker</h1>
+      <p class="sub">Type the energy, XP and cash from each of the three missions. The tool divides by energy and picks the best one.</p>
+    </div>
+    <button type="button" id="clear">Clear all</button>
+  </header>
+
+  <details class="import" id="import" open>
+    <summary>Mission Reader: see the best mission right in the game</summary>
+    <p class="intro">Mission Reader is a bookmark. Click it while you play and a small panel shows which of the 3 missions gives you the most for your energy. You set it up once, which takes about a minute. It works on a computer in Chrome, Edge, Brave or Opera.</p>
+
+    <h3>Set it up (once)</h3>
+    <ol class="steps">
+      <li>Make your bookmarks bar visible: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>. A bar appears under the address bar. On a Mac, press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>.</li>
+      <li>Hold down the mouse on this red button and drag it up onto that bar. Let go there.
+        <a class="bm" id="bm-link" href="#" draggable="true">Mission Reader</a>
+      </li>
+      <li>Done. You now have a <strong>Mission Reader</strong> button in your bookmarks bar.</li>
+    </ol>
+
+    <details class="fallback">
+      <summary>Dragging doesn't work? Do this instead</summary>
+      <ol class="steps">
+        <li>Click <strong>Copy code</strong> below.
+          <div class="code-row">
+            <textarea id="bm-code" rows="2" readonly spellcheck="false" aria-label="Mission Reader bookmark code"></textarea>
+            <button type="button" data-copy-from="bm-code">Copy code</button>
+          </div>
+        </li>
+        <li>Right-click an empty spot on your bookmarks bar and choose <strong>Add page</strong> (in some browsers it's called <strong>Add bookmark</strong>).</li>
+        <li>For the name, type <strong>Mission Reader</strong>. Click in the URL box, delete what's there and press <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste. Click <strong>Save</strong>.</li>
+      </ol>
+    </details>
+
+    <h3>Use it</h3>
+    <ol class="steps">
+      <li>Open the game and go to the <strong>Godfather</strong> bar.</li>
+      <li>Click <strong>Mission Reader</strong> in your bookmarks bar. The panel appears in the top-right corner.</li>
+      <li>The big red name at the top is the mission to pick. Use the buttons to choose what you care about:
+        <strong>XP</strong> for leveling up, <strong>Cash</strong> for money, <strong>Balanced</strong> for both.</li>
+    </ol>
+
+    <h3>Good to know</h3>
+    <ul class="steps">
+      <li>You only click the bookmark once per visit. The panel hides by itself when you leave the Godfather bar and comes back when you return.</li>
+      <li>If you reload the game page (F5) or open it again later, click the bookmark again.</li>
+      <li>A tag like <strong>Gold</strong> or <strong>Legendary</strong> next to a name means that mission also gives an item. The higher the tier, the better the item: Item, Gold, Epic, Legendary, Unique. Epic and better ones glow.</li>
+      <li>Drag the panel by its top edge to move it. <strong>&ndash;</strong> makes it small, <strong>&#9680;</strong> switches between dark and light, <strong>&times;</strong> closes it.</li>
+    </ul>
+  </details>
+  <p class="status" id="status" role="status" hidden></p>
+
+  <section class="verdict" aria-live="polite">
+    <div>
+      <div class="label">Best mission</div>
+      <div class="pick" id="pick">–</div>
+      <p class="pick-why" id="pick-why"></p>
+      <div class="leaders">
+        <span>Most XP per energy: <b class="k-xp" id="lead-xp">–</b></span>
+        <span>Most cash per energy: <b class="k-cash" id="lead-cash">–</b></span>
+      </div>
+    </div>
+    <div class="weight">
+      <label class="label" for="weight">What matters more to you</label>
+      <div class="weight-row"><span class="k-xp" id="w-xp">XP 50%</span><span class="k-cash" id="w-cash">Cash 50%</span></div>
+      <input type="range" id="weight" min="0" max="100" step="5" value="50">
+      <div class="presets">
+        <button type="button" data-w="100">XP only</button>
+        <button type="button" data-w="50">Balanced</button>
+        <button type="button" data-w="0">Cash only</button>
+      </div>
+      <p class="hint">Score = how close each mission gets to the best XP and cash per energy, mixed by this slider. 100 means best at both.</p>
+    </div>
+  </section>
+
+  <section class="missions" id="missions"></section>
+</div>
+
+<!-- Runs on the game page (as a userscript or a bookmarklet). Reads the missions from the game's
+     own data cache (query "getAvailableQuests"), shows the best one while the Godfather bar is open,
+     and copies them for this page. -->
+<script type="text/plain" id="reader-src">
+(function () {
+  // A newer copy (updated bookmark or userscript) replaces one that is already running on the page.
+  var VERSION = 7;
+  var running = window.__mrReader;
+  if (running && running.version >= VERSION) { running.show(); return; }
+  if (running && running.stop) { running.stop(); }
+  var ID = "mr-reader-panel";
+  // Versions before 3 can't be stopped, so hide their panel instead.
+  if (running && !document.getElementById("mr-reader-hide-old")) {
+    var hideOld = document.createElement("style");
+    hideOld.id = "mr-reader-hide-old";
+    hideOld.textContent = "#mr-mission-reader{display:none!important}";
+    document.head.appendChild(hideOld);
+  }
+  var oldPanel = document.getElementById("mr-mission-reader");
+  if (oldPanel) { oldPanel.remove(); }
+  var PAGE = "/game/godfather";
+  var NAMES = {
+    old_man: "Old Man", cookie: "Cookie", agatha: "Agatha", sean: "Sean", vincenzo: "Vincenzo", velvet: "Velvet Kiss",
+    dwayne: "Dwayne", jose: "José", isabel: "Isabel", carlos: "Carlos", little_joe: "Little Joe",
+    madam_chow: "Mihn", mei: "Amaya", wing: "Akuma", ah_keung: "Mr. Woo", suki: "Katara"
+  };
+  // Which city the bar is in, told by who is handing out the missions there.
+  var CITY = {
+    sean: "ny", vincenzo: "ny", velvet: "ny",
+    dwayne: "miami", jose: "miami", isabel: "miami", carlos: "miami",
+    madam_chow: "hk", mei: "hk", wing: "hk", ah_keung: "hk", suki: "hk"
+  };
+  var MODES = { xp: { w: 1, label: "XP", title: "Best for XP" }, balanced: { w: 0.5, label: "Balanced", title: "Best balanced" }, cash: { w: 0, label: "Cash", title: "Best for cash" } };
+  var prefs = { mode: "balanced", min: false, skin: "dark", pos: null, region: "ny" };
+  try {
+    var saved = JSON.parse(localStorage.getItem("mr-reader") || "{}");
+    if (MODES[saved.mode]) { prefs.mode = saved.mode; }
+    if (saved.region === "miami" || saved.region === "hk") { prefs.region = saved.region; }
+    prefs.min = !!saved.min;
+    if (saved.skin === "game") { prefs.skin = "game"; }
+    if (saved.pos && isFinite(saved.pos.x) && isFinite(saved.pos.y)) { prefs.pos = saved.pos; }
+  } catch (e) {}
+  function savePrefs() { try { localStorage.setItem("mr-reader", JSON.stringify(prefs)); } catch (e) {} }
+
+  var client = null, box = null, closed = false, notice = false, lastKey = "", lastPath = location.pathname, list = [];
+
+  // Item names and pictures come from the game's own item table, read from its ItemImg script file.
+  // [badge label, color, rare]. Only rare items glow. The colors work on both panel styles.
+  var TIERS = {
+    cash: ["Item", "", false], gold1: ["Gold", "#c9961a", false], gold2: ["Gold II", "#c9961a", false], gold3: ["Gold III", "#c9961a", false],
+    epic1: ["Epic", "#e0524f", true], epic2: ["Epic II", "#e0524f", true], legendary: ["Legendary", "#9b5fd0", true], unique: ["Unique", "#2fa3d6", true]
+  };
+  var items = null, itemsLoading = false;
+  function loadItems() {
+    if (items || itemsLoading) { return; }
+    var url = null;
+    performance.getEntriesByType("resource").some(function (e) {
+      if (/\/assets\/ItemImg-[\w-]+\.js/.test(e.name)) { url = e.name; return true; }
+      return false;
+    });
+    if (!url) { return; }
+    itemsLoading = true;
+    fetch(url).then(function (r) { return r.text(); }).then(function (t) {
+      var map = {}, m, re = /\{id:`([^`]+)`([^{}]*?)\}/g;
+      while ((m = re.exec(t))) {
+        var name = (m[2].match(/name:`([^`]+)`/) || [])[1], img = (m[2].match(/img:`([^`]+)`/) || [])[1];
+        if (name || img) { map[m[1]] = { name: name, img: img }; }
+      }
+      items = map; lastKey = "";
+    }, function () { items = {}; });
+  }
+  function itemInfo(it) {
+    var def = (items && items[it.id]) || {};
+    var tier = TIERS[it.tier] || [it.tier ? nice(it.tier) : "Item", "", false];
+    return { name: def.name || nice(it.id), img: def.img || "", label: tier[0], color: tier[1] || "var(--muted)", rare: tier[2] };
+  }
+
+  function nice(g) {
+    if (NAMES[g]) { return NAMES[g]; }
+    return String(g || "Mission").split("_").map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(" ");
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]; }); }
+  function fmt(v) { return v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
+  function isQuest(q) { return !!q && typeof q === "object" && typeof q.energy === "number" && (typeof q.xp === "number" || typeof q.cash === "number"); }
+  function pickList(d, depth) {
+    if (Array.isArray(d)) { return d.filter(isQuest); }
+    if (d && typeof d === "object" && depth < 3) {
+      for (var k in d) { var r = pickList(d[k], depth + 1); if (r.length) { return r; } }
+    }
+    return [];
+  }
+  function fiberOf(el) {
+    var ks = Object.keys(el);
+    for (var i = 0; i < ks.length; i++) { if (ks[i].indexOf("__reactFiber$") === 0) { return el[ks[i]]; } }
+    return null;
+  }
+  function walk(visit) {
+    var els = [document.body].concat(Array.prototype.slice.call(document.querySelectorAll("body *")));
+    var start = null;
+    for (var i = 0; i < els.length && !start; i++) { if (els[i].id !== ID) { start = fiberOf(els[i]); } }
+    if (!start) { return; }
+    while (start.return) { start = start.return; }
+    var stack = [start], n = 0;
+    while (stack.length && n < 300000) {
+      var f = stack.pop(); n++;
+      if (visit(f)) { return; }
+      if (f.sibling) { stack.push(f.sibling); }
+      if (f.child) { stack.push(f.child); }
+    }
+  }
+  function readQuests() {
+    if (!client) {
+      walk(function (f) {
+        var p = f.memoizedProps;
+        if (p && p.client && typeof p.client.getQueryCache === "function") { client = p.client; return true; }
+      });
+    }
+    if (client) {
+      var q = client.getQueryCache().find({ queryKey: ["getAvailableQuests"] });
+      var fromCache = q ? pickList(q.state.data, 0) : [];
+      if (fromCache.length) { return fromCache; }
+    }
+    var fromProps = [];
+    walk(function (f) {
+      var p = f.memoizedProps;
+      if (p && isQuest(p.quest) && fromProps.indexOf(p.quest) < 0) { fromProps.push(p.quest); }
+    });
+    return fromProps;
+  }
+
+  function rank() {
+    var w = MODES[prefs.mode].w, maxX = 0, maxC = 0;
+    list.forEach(function (m) {
+      m.xpr = m.xp / m.energy; m.cr = m.cash / m.energy;
+      maxX = Math.max(maxX, m.xpr); maxC = Math.max(maxC, m.cr);
+    });
+    var r = { bx: null, bc: null, bs: null };
+    list.forEach(function (m) {
+      m.score = (w * (maxX ? m.xpr / maxX : 0) + (1 - w) * (maxC ? m.cr / maxC : 0)) * 100;
+      if (!r.bx || m.xpr > r.bx.xpr) { r.bx = m; }
+      if (!r.bc || m.cr > r.bc.cr) { r.bc = m; }
+      if (!r.bs || m.score > r.bs.score) { r.bs = m; }
+    });
+    return r;
+  }
+
+  // Two looks: "dark" (the default) is the night-club panel, "game" copies the game's own white tooltip cards.
+  // The dark look takes its colors from the city: New York red, Miami ocean teal, Hong Kong neon blue.
+  var css = "#ID{position:fixed;top:12px;right:12px;z-index:2147483647;background:var(--bg);color:var(--fg);font:var(--font);border:var(--border);border-radius:var(--radius);padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.45),var(--glow,0 0 0 transparent);width:min(430px,calc(100vw - 24px));text-align:left}"
+    + "#ID.skin-game{--bg:#fff;--fg:#1a1a1a;--muted:#666;--line:#d6d6d6;--strong:#000;--accent:#ee5d58;--xp:#c2477a;--cash:#3a8a2a;--font:700 13px/1.4 'Courier New',Courier,monospace;--ui:700 11px/1.3 'Courier New',Courier,monospace;--border:1px solid #9a9a9a;--radius:8px;--img-bg:#fff;--img-border:1px solid #9a9a9a;--hl:rgba(238,93,88,.07)}"
+    + "#ID.skin-dark{--bg:#1d1015;--fg:#f4e7ea;--muted:#b2939b;--line:#2d1820;--strong:#43252f;--accent:#ff4b5c;--xp:#f5a0b4;--cash:#93d36d;--font:14px/1.4 system-ui,sans-serif;--ui:600 11px/1.3 system-ui,sans-serif;--border:2px solid #ff4b5c;--radius:10px;--img-bg:#f4e7ea;--img-border:0;--hl:rgba(255,75,92,.1)}"
+    + "#ID.skin-dark.miami{--bg:linear-gradient(180deg,#0e2430,#0a1820);--fg:#e4f5f6;--muted:#86aeb6;--line:#15333f;--strong:#21495a;--accent:#22d3c5;--xp:#ff9ec4;--cash:#c3e86a;--border:2px solid #22d3c5;--img-bg:#e4f5f6;--hl:rgba(34,211,197,.1);--on-accent:#04242a}"
+    + "#ID.skin-dark.hk{--bg:linear-gradient(180deg,#121637,#0b0e24);--fg:#e8eaff;--muted:#9097c6;--line:#1d2348;--strong:#2c3466;--accent:#4db2ff;--xp:#e7a3ff;--cash:#8ee39a;--border:2px solid #4db2ff;--img-bg:#e8eaff;--hl:rgba(77,178,255,.11);--on-accent:#0b0e24;--glow:0 0 18px rgba(77,178,255,.35)}"
+    + "#ID.skin-dark.hk .pick{text-shadow:0 0 12px rgba(77,178,255,.55)}"
+    + "#ID.min{width:auto;padding:8px 10px}#ID.dragging{opacity:.9}"
+    + "#ID *{box-sizing:border-box}"
+    + "#ID .top{display:flex;align-items:center;gap:6px;cursor:move;user-select:none}#ID .grow{flex:1}"
+    + "#ID .t{font:var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}"
+    + "#ID hr{border:0;border-top:2px solid var(--strong);margin:8px 0}"
+    + "#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent)}"
+    + "#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID b.x{color:var(--xp)}#ID b.c{color:var(--cash)}#ID b.a{color:var(--accent);font-weight:700}"
+    + "#ID table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}"
+    + "#ID th{font:var(--ui);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:2px solid var(--strong)}"
+    + "#ID td{text-align:right;padding:6px;border-bottom:1px solid var(--line);vertical-align:top}#ID th:first-child,#ID td:first-child{text-align:left}"
+    + "#ID td.x{color:var(--xp);font-weight:700}#ID td.c{color:var(--cash);font-weight:700}"
+    + "#ID tr.best td{background:var(--hl)}#ID tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}"
+    + "#ID tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID tr.best .nm{font-weight:700}"
+    + "#ID tr.best .nm::before{content:'\\25B6\\00a0';color:var(--accent);font-size:9px;vertical-align:1px}#ID tr.best td.sc{color:var(--accent);font-weight:700}"
+    + "#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}"
+    + "#ID .ib.rare{background:var(--c);color:#fff;animation:mrGlow 1.6s ease-in-out infinite}"
+    + "@keyframes mrGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}"
+    + "@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}"
+    + "#ID .item{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}"
+    + "#ID .item img{width:38px;height:22px;object-fit:contain;background:var(--img-bg);border:var(--img-border);border-radius:4px;padding:2px}"
+    + "#ID button{font:var(--ui);letter-spacing:.04em;text-transform:uppercase;border-radius:6px;padding:6px 10px;cursor:pointer;border:1px solid var(--strong);background:transparent;color:var(--fg)}"
+    + "#ID button:hover{border-color:var(--accent)}#ID button.go{background:var(--accent);border-color:var(--accent);color:var(--on-accent,#fff)}"
+    + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}"
+    + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}"
+    + "#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}"
+    + "#ID .seg button.on{background:var(--accent);color:var(--on-accent,#fff)}"
+    + "#ID .ver{margin-top:6px;text-align:right;font-size:10px;color:var(--muted)}#ID p{margin:8px 0 0}";
+
+  function badge(it) {
+    return "<span class='ib" + (it.rare ? " rare" : "") + "' style='--c:" + it.color + "'>" + esc(it.label) + "</span>";
+  }
+
+  function draw() {
+    if (!box || !document.body.contains(box)) {
+      box = document.createElement("div");
+      box.id = ID;
+      box.addEventListener("click", onClick);
+      box.addEventListener("pointerdown", onDown);
+      box.addEventListener("pointermove", onMove);
+      box.addEventListener("pointerup", onUp);
+      box.addEventListener("pointercancel", onUp);
+      box.addEventListener("dblclick", onDbl);
+      document.body.appendChild(box);
+    }
+    var mode = MODES[prefs.mode];
+    var seg = "<span class='seg'>" + Object.keys(MODES).map(function (k) {
+      return "<button type='button' data-mode='" + k + "' class='" + (k === prefs.mode ? "on" : "") + "'>" + MODES[k].label + "</button>";
+    }).join("") + "</span>";
+    var close = "<button type='button' class='icon' data-close title='Close'>&times;</button>";
+    var skin = "<button type='button' class='icon' data-skin title='Switch style'>&#9680;</button>";
+    var html = "<style>" + css.replace(/#ID/g, "#" + ID) + "</style>";
+    box.className = "skin-" + prefs.skin + " " + prefs.region + (prefs.min ? " min" : "");
+
+    if (notice) {
+      html += "<div class='top'><span class='t grow'>Mission Reader</span>" + close + "</div>"
+        + "<p>Open the Godfather bar to see the best mission. This panel shows up there by itself.</p>";
+    } else if (!list.length) {
+      html += "<div class='top'><span class='t grow'>Mission Reader</span>" + close + "</div>"
+        + "<p>Waiting for the missions to load…</p>";
+    } else {
+      var r = rank();
+      var bestItem = r.bs.item ? itemInfo(r.bs.item) : null;
+      if (prefs.min) {
+        html += "<div class='top' title='Drag to move, double-click to reset'><span class='t'>" + mode.title + ":</span> <b class='a'>" + esc(r.bs.name) + "</b>"
+          + (bestItem ? badge(bestItem) : "")
+          + "<button type='button' class='icon' data-min title='Expand'>&#9662;</button>" + close + "</div>";
+      } else {
+        html += "<div class='top' title='Drag to move, double-click to reset'><span class='t grow'>" + mode.title + "</span>" + seg + skin
+          + "<button type='button' class='icon' data-min title='Minimize'>&ndash;</button>" + close + "</div>"
+          + "<hr><div class='pick'>" + esc(r.bs.name) + "</div><hr>"
+          + "<div class='lead'>Most XP per energy: <b class='x'>" + esc(r.bx.name) + "</b> &middot; Most cash per energy: <b class='c'>" + esc(r.bc.name) + "</b></div>"
+          + "<table><thead><tr><th>Mission</th><th>Energy</th><th>XP/E</th><th>Cash/E</th><th>Score</th></tr></thead><tbody>";
+        list.forEach(function (m) {
+          var it = m.item ? itemInfo(m.item) : null;
+          var cls = (m === r.bs ? "best" : "") + (it && it.rare ? " rare" : "");
+          html += "<tr class='" + cls + "'" + (it ? " style='--c:" + it.color + "'" : "") + "><td><span class='nm'>" + esc(m.name) + "</span>"
+            + (it ? badge(it) + "<div class='item'>" + (it.img ? "<img src='" + esc(it.img) + "' alt=''>" : "") + "<span>" + esc(it.name) + "</span></div>" : "")
+            + "</td><td>" + m.energy + "</td>"
+            + "<td class='" + (m === r.bx ? "x" : "") + "'>" + fmt(m.xpr) + "</td>"
+            + "<td class='" + (m === r.bc ? "c" : "") + "'>" + fmt(m.cr) + "</td>"
+            + "<td class='sc'>" + Math.round(m.score) + "</td></tr>";
+        });
+        html += "</tbody></table><div class='ver'>v" + VERSION + "</div>";
+      }
+    }
+    box.innerHTML = html;
+    place();
+  }
+
+  // Drag the panel by its top row. The spot is remembered; double-click the top row to send it back to the corner.
+  var drag = null;
+  function place() {
+    if (!box) { return; }
+    if (!prefs.pos) { box.style.left = ""; box.style.top = ""; box.style.right = ""; return; }
+    var x = Math.min(Math.max(0, prefs.pos.x), Math.max(0, window.innerWidth - box.offsetWidth));
+    var y = Math.min(Math.max(0, prefs.pos.y), Math.max(0, window.innerHeight - box.offsetHeight));
+    box.style.left = x + "px"; box.style.top = y + "px"; box.style.right = "auto";
+  }
+  function onDown(ev) {
+    if (ev.button !== 0 || !ev.target.closest(".top") || ev.target.closest("button")) { return; }
+    var rect = box.getBoundingClientRect();
+    drag = { dx: ev.clientX - rect.left, dy: ev.clientY - rect.top };
+    box.setPointerCapture(ev.pointerId);
+    box.classList.add("dragging");
+    ev.preventDefault();
+  }
+  function onMove(ev) {
+    if (!drag) { return; }
+    prefs.pos = { x: ev.clientX - drag.dx, y: ev.clientY - drag.dy };
+    place();
+  }
+  function onUp() {
+    if (!drag) { return; }
+    drag = null;
+    box.classList.remove("dragging");
+    var rect = box.getBoundingClientRect();
+    prefs.pos = { x: Math.round(rect.left), y: Math.round(rect.top) };
+    savePrefs();
+  }
+  function onDbl(ev) {
+    if (!ev.target.closest(".top") || ev.target.closest("button")) { return; }
+    prefs.pos = null; savePrefs(); place();
+  }
+
+  function remove() { if (box) { box.remove(); box = null; } }
+
+  function onClick(ev) {
+    var t = ev.target.closest("button");
+    if (!t) { return; }
+    if (t.hasAttribute("data-close")) { closed = true; notice = false; remove(); return; }
+    if (t.hasAttribute("data-min")) { prefs.min = !prefs.min; savePrefs(); lastKey = ""; tick(); return; }
+    if (t.hasAttribute("data-mode")) { prefs.mode = t.getAttribute("data-mode"); savePrefs(); lastKey = ""; tick(); return; }
+    if (t.hasAttribute("data-skin")) { prefs.skin = prefs.skin === "game" ? "dark" : "game"; savePrefs(); lastKey = ""; tick(); return; }
+  }
+
+  // Runs a few times a second: shows the panel on the Godfather bar, hides it elsewhere,
+  // and redraws when the missions change (for example after you finish one).
+  function tick() {
+    var path = location.pathname.replace(/\/+$/, "");
+    if (path !== lastPath) { lastPath = path; closed = false; notice = false; }
+    var onPage = path === PAGE;
+    if (!onPage && !notice) { remove(); lastKey = ""; return; }
+    if (closed) { return; }
+    if (onPage) {
+      notice = false;
+      list = readQuests().map(function (q) {
+        return {
+          name: nice(q.giver), giver: q.giver, energy: q.energy, xp: q.xp || 0, cash: q.cash || 0,
+          item: q.item && q.item.id ? { id: String(q.item.id), tier: q.item.tier || "" } : null
+        };
+      }).filter(function (m) { return m.energy > 0; });
+      if (list.some(function (m) { return m.item; })) { loadItems(); }
+      var votes = {}, region = null;
+      list.forEach(function (m) {
+        var c = CITY[m.giver];
+        if (c) { votes[c] = (votes[c] || 0) + 1; if (!region || votes[c] > votes[region]) { region = c; } }
+      });
+      if (region && region !== prefs.region) { prefs.region = region; savePrefs(); }
+    }
+    var key = JSON.stringify(list) + prefs.mode + prefs.min + prefs.skin + prefs.region + notice;
+    if (box && document.body.contains(box) && key === lastKey) { return; }
+    lastKey = key;
+    draw();
+  }
+
+  var timer = null;
+  window.__mrReader = {
+    version: VERSION,
+    show: function () {
+      closed = false;
+      notice = location.pathname.replace(/\/+$/, "") !== PAGE;
+      lastKey = "";
+      tick();
+    },
+    stop: function () { clearInterval(timer); window.removeEventListener("resize", place); remove(); }
+  };
+  window.addEventListener("resize", place);
+  var leftover = document.getElementById(ID);
+  if (leftover) { leftover.remove(); }
+  lastPath = location.pathname.replace(/\/+$/, "");
+  // Clicked as a bookmark away from the bar: say where to go. The userscript starts silently.
+  notice = !window.__mrAuto && lastPath !== PAGE;
+  timer = setInterval(tick, 700);
+  tick();
+})();
+</script>
+
+<script>
+(function () {
+  var EXAMPLE = [
+    { name: "Sean", e: "9.6", xp: "7,497", cash: "4,244" },
+    { name: "Vincenzo", e: "4.8", xp: "2,342", cash: "3,553" },
+    { name: "Velvet Kiss", e: "2.35", xp: "1,713", cash: "1,416" }
+  ];
+  var KEY = "mission-picker-v1";
+  var host = document.getElementById("missions");
+  var weight = document.getElementById("weight");
+
+  function load() {
+    try { var s = JSON.parse(localStorage.getItem(KEY)); if (s && s.m && s.m.length === 3) return s; } catch (e) {}
+    return { m: EXAMPLE, w: 50 };
+  }
+  function save(state) {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+  }
+
+  // Energy can be "9.6" or "9,6"; XP and cash are whole numbers like "7,497".
+  function parseEnergy(s) {
+    s = String(s).replace(/\s/g, "");
+    if (s.indexOf(",") > -1 && s.indexOf(".") === -1) s = s.replace(",", ".");
+    else s = s.replace(/,/g, "");
+    var n = parseFloat(s);
+    return isFinite(n) ? n : NaN;
+  }
+  function parseWhole(s) {
+    var d = String(s).replace(/[^\d]/g, "");
+    return d ? parseInt(d, 10) : NaN;
+  }
+  function fmt(n) {
+    return n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+
+  var fields = [
+    ["name", "Mission", "text", "e.g. Sean"],
+    ["e", "Energy", "decimal", "9.6"],
+    ["xp", "XP", "numeric", "7,497"],
+    ["cash", "Cash", "numeric", "4,244"]
+  ];
+
+  for (var i = 0; i < 3; i++) {
+    var card = document.createElement("article");
+    card.className = "mission";
+    card.id = "card" + i;
+    var html = '<div class="mission-head"><span class="label">Mission ' + "ABC"[i] + '</span><div class="badges" id="badges' + i + '"></div></div>';
+    html += '<div class="field name"><label class="label" for="m' + i + '-name">Name</label><input id="m' + i + '-name" type="text" autocomplete="off" placeholder="' + fields[0][3] + '"></div>';
+    html += '<label class="item-toggle" for="m' + i + '-item"><input id="m' + i + '-item" type="checkbox"> Gives an item <span class="item-name" id="m' + i + '-itemname"></span></label>';
+    html += '<div class="nums">';
+    for (var f = 1; f < fields.length; f++) {
+      html += '<div class="field"><label class="label" for="m' + i + "-" + fields[f][0] + '">' + fields[f][1] + '</label><input id="m' + i + "-" + fields[f][0] + '" type="text" inputmode="' + fields[f][2] + '" autocomplete="off" placeholder="' + fields[f][3] + '"></div>';
+    }
+    html += "</div>";
+    html += '<div class="results">' +
+      '<div class="stat xp"><div class="stat-top"><span class="label">XP per energy</span><span class="stat-val" id="xpr' + i + '">–</span></div><div class="bar"><i id="xpb' + i + '"></i></div></div>' +
+      '<div class="stat cash"><div class="stat-top"><span class="label">Cash per energy</span><span class="stat-val" id="cr' + i + '">–</span></div><div class="bar"><i id="cb' + i + '"></i></div></div>' +
+      '<div class="score"><span class="label">Score</span><span class="stat-val" id="sc' + i + '">–</span></div>' +
+      "</div>";
+    card.innerHTML = html;
+    host.appendChild(card);
+  }
+
+  var inputs = Array.prototype.slice.call(host.querySelectorAll("input"));
+  var state = load();
+  for (var j = 0; j < 3; j++) {
+    var m = state.m[j] || {};
+    document.getElementById("m" + j + "-name").value = m.name || "";
+    document.getElementById("m" + j + "-e").value = m.e || "";
+    document.getElementById("m" + j + "-xp").value = m.xp || "";
+    document.getElementById("m" + j + "-cash").value = m.cash || "";
+    document.getElementById("m" + j + "-item").checked = !!m.item;
+    document.getElementById("m" + j + "-itemname").textContent = m.itemName || "";
+  }
+  weight.value = state.w != null ? state.w : 50;
+
+  function read() {
+    var out = [];
+    for (var i = 0; i < 3; i++) {
+      out.push({
+        name: document.getElementById("m" + i + "-name").value,
+        e: document.getElementById("m" + i + "-e").value,
+        xp: document.getElementById("m" + i + "-xp").value,
+        cash: document.getElementById("m" + i + "-cash").value,
+        item: document.getElementById("m" + i + "-item").checked,
+        itemName: document.getElementById("m" + i + "-itemname").textContent
+      });
+    }
+    return out;
+  }
+
+  function compute() {
+    var raw = read();
+    var w = Number(weight.value) / 100;
+    save({ m: raw, w: Number(weight.value) });
+
+    document.getElementById("w-xp").textContent = "XP " + Math.round(w * 100) + "%";
+    document.getElementById("w-cash").textContent = "Cash " + Math.round((1 - w) * 100) + "%";
+    document.querySelectorAll(".presets button").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(Number(b.dataset.w) === Number(weight.value)));
+    });
+
+    var rows = raw.map(function (m, i) {
+      var e = parseEnergy(m.e), xp = parseWhole(m.xp), cash = parseWhole(m.cash);
+      var ok = e > 0 && (!isNaN(xp) || !isNaN(cash));
+      return {
+        i: i,
+        name: m.name.trim() || "Mission " + "ABC"[i],
+        ok: ok,
+        xpr: ok && !isNaN(xp) ? xp / e : 0,
+        cr: ok && !isNaN(cash) ? cash / e : 0
+      };
+    });
+    var valid = rows.filter(function (r) { return r.ok; });
+    var maxX = Math.max.apply(null, valid.map(function (r) { return r.xpr; }).concat(0));
+    var maxC = Math.max.apply(null, valid.map(function (r) { return r.cr; }).concat(0));
+
+    rows.forEach(function (r) {
+      r.score = r.ok ? (w * (maxX ? r.xpr / maxX : 0) + (1 - w) * (maxC ? r.cr / maxC : 0)) * 100 : -1;
+    });
+    function best(key) {
+      var b = null;
+      valid.forEach(function (r) { if (r[key] > 0 && (!b || r[key] > b[key])) b = r; });
+      return b;
+    }
+    var bx = best("xpr"), bc = best("cr"), bs = best("score");
+
+    rows.forEach(function (r) {
+      var i = r.i;
+      document.getElementById("xpr" + i).textContent = r.ok ? fmt(r.xpr) : "–";
+      document.getElementById("cr" + i).textContent = r.ok ? fmt(r.cr) : "–";
+      document.getElementById("sc" + i).textContent = r.ok ? Math.round(r.score) : "–";
+      document.getElementById("xpb" + i).style.width = (r.ok && maxX ? r.xpr / maxX * 100 : 0) + "%";
+      document.getElementById("cb" + i).style.width = (r.ok && maxC ? r.cr / maxC * 100 : 0) + "%";
+      var badges = "";
+      if (bs && bs.i === i && valid.length > 1) badges += '<span class="badge best">Best pick</span>';
+      if (bx && bx.i === i && valid.length > 1) badges += '<span class="badge xp">Top XP</span>';
+      if (bc && bc.i === i && valid.length > 1) badges += '<span class="badge cash">Top cash</span>';
+      // Only rare drops (Epic, Legendary, Unique) glow, so they stand out when every mission has an item.
+      var rareItem = /\((Epic|Legendary|Unique)/.test(raw[i].itemName);
+      if (raw[i].item) badges += '<span class="badge item' + (rareItem ? " rare" : "") + '">' + (rareItem ? "Rare item" : "Item") + '</span>';
+      document.getElementById("card" + i).classList.toggle("has-item", !!raw[i].item);
+      if (!raw[i].item) document.getElementById("m" + i + "-itemname").textContent = "";
+      document.getElementById("badges" + i).innerHTML = badges;
+      document.getElementById("card" + i).classList.toggle("is-best", !!(bs && bs.i === i && valid.length > 1));
+    });
+
+    var pick = document.getElementById("pick"), why = document.getElementById("pick-why");
+    if (valid.length < 2 || !bs) {
+      pick.textContent = "–";
+      why.textContent = "Fill in energy plus XP or cash for at least two missions.";
+    } else {
+      pick.textContent = bs.name;
+      var focus = w === 1 ? "XP only" : w === 0 ? "cash only" : Math.round(w * 100) + "% XP / " + Math.round((1 - w) * 100) + "% cash";
+      why.textContent = "Score " + Math.round(bs.score) + " with " + focus + ": " + fmt(bs.xpr) + " XP and " + fmt(bs.cr) + " cash per energy.";
+    }
+    document.getElementById("lead-xp").textContent = bx ? bx.name + " (" + fmt(bx.xpr) + ")" : "–";
+    document.getElementById("lead-cash").textContent = bc ? bc.name + " (" + fmt(bc.cr) + ")" : "–";
+  }
+
+  host.addEventListener("input", compute);
+  weight.addEventListener("input", compute);
+  document.querySelectorAll(".presets button").forEach(function (b) {
+    b.addEventListener("click", function () { weight.value = b.dataset.w; compute(); });
+  });
+  // Enter jumps to the next box, so you can type all 12 values without the mouse.
+  host.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Enter") return;
+    var k = inputs.indexOf(ev.target);
+    if (k > -1) { ev.preventDefault(); (inputs[k + 1] || inputs[0]).focus(); (inputs[k + 1] || inputs[0]).select(); }
+  });
+  host.addEventListener("focusin", function (ev) { if (ev.target.select) ev.target.select(); });
+  document.getElementById("clear").addEventListener("click", function () {
+    inputs.forEach(function (el) { if (el.type === "checkbox") el.checked = false; else el.value = ""; });
+    compute();
+    inputs[0].focus();
+  });
+
+  // The reader source, packaged as a bookmarklet.
+  var bookmarklet = "javascript:" + encodeURIComponent(document.getElementById("reader-src").textContent.trim());
+  document.getElementById("bm-code").value = bookmarklet;
+  var bmLink = document.getElementById("bm-link");
+  bmLink.setAttribute("href", bookmarklet);
+  bmLink.addEventListener("click", function (ev) { ev.preventDefault(); showStatus("Drag this button to your bookmarks bar instead of clicking it.", true); });
+  document.querySelectorAll("[data-copy-from]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var box = document.getElementById(btn.getAttribute("data-copy-from"));
+      function ok() { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy code"; }, 1500); }
+      function fallback() { box.focus(); box.select(); showStatus("Press Ctrl+C to copy the selected code.", false); }
+      try { navigator.clipboard.writeText(box.value).then(ok, fallback); } catch (e) { fallback(); }
+    });
+  });
+
+  var statusEl = document.getElementById("status"), statusTimer;
+  function showStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle("err", !!isError);
+    statusEl.hidden = false;
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () { statusEl.hidden = true; }, 6000);
+  }
+
+  compute();
+})();
+</script>
