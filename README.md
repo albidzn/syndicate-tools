@@ -21,7 +21,10 @@ Discord webhook links, member links and history are saved only in each browser, 
 ## Making a change
 
 1. Edit `syndicate-activity-reporter.user.js`.
-2. Raise the version in **both** places: `// @version` in the header and `var VERSION` near the top. Tampermonkey only updates when `@version` goes up.
+2. Raise the version in **both** places: `// @version` in the header and `var VERSION` near the top. Tampermonkey only updates when `@version` goes up. Versions are `major.minor.patch`:
+   - **patch** (2.0.0 → 2.0.1) for fixes and small tweaks,
+   - **minor** (2.0.1 → 2.1.0) for new features,
+   - **major** (2.x → 3.0.0) only for big redesigns.
 3. Commit and push to `main`. Everyone gets the new version with the next update check.
 
 The Mission Reader has no automatic updates: after a change, raise its `VERSION`, and members re-add the bookmark from the new file.

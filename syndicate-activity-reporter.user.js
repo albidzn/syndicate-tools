@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.32
+// @version      2.0.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.32";
+  var VERSION = "2.0.0";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -1505,7 +1505,14 @@ function reporter() {
     if (job && job.running) { h += "<div class='st wait'>Sending invitations… " + job.done + " of " + job.total + (job.current ? " · " + esc(job.current) : "") + " <button type='button' data-invstop>Stop</button></div>"; }
     else if (job && job.error) { h += "<div class='st bad'>" + esc(job.error) + "</div>"; }
     else if (job && job.msg) { h += "<div class='st'>" + esc(job.msg) + "</div>"; }
+    // Buttons and the scan summary above the list, so nothing needs scrolling down.
+    h += "<div class='row'><button type='button' class='go' data-rscan" + (recruiting && recruiting.running ? " disabled" : "") + ">" + (r ? "Scan again" : "Find recruits") + "</button>"
+      + (open ? "<button type='button' data-inviteall" + (job && job.running ? " disabled" : "") + ">Invite all (" + open + ")</button>" : "")
+      + (list.length ? "<button type='button' data-copyall>Copy all names</button>" : "")
+      + (list.length && s.webhook ? "<button type='button' data-postrecruits>Post to leadership chat</button>" : "") + "</div>";
     if (r) {
+      h += "<div class='st'>" + list.length + " of " + Object.keys(r.list.reduce(function (o, p) { o[p.id] = 1; return o; }, {})).length + " searching players shown · scanned " + clock(r.at)
+        + (Date.now() - r.at > 3600000 ? " (over an hour ago)" : "") + ", " + r.total.toLocaleString("en-US") + " players checked.</div>";
       h += "<table><thead><tr><th>Rank</th><th>Name</th><th>Class</th><th>Level</th><th>Honor</th><th title='Levels and honor gained since the scans first saw them searching'>Growth</th><th></th><th></th></tr></thead><tbody>"
         + (list.length ? list.map(function (p) {
           var g = growth(s, p), gt = !g || g.days < 0.5 ? "<span class='idle'>new</span>" : (g.lv > 0 ? "+" + g.lv + " lv " : "") + (g.honor > 0 ? "+" + g.honor + " hon " : "") + (g.lv <= 0 && g.honor <= 0 ? "– " : "") + "<span class='idle'>" + Math.round(g.days) + "d</span>";
@@ -1517,17 +1524,12 @@ function reporter() {
             + (copied === p.name ? " <span class='idle'>copied ✓</span>" : "") + "</button></td><td>" + esc(SPECS[p.spec] || p.spec || "?") + "</td><td>" + p.level + "</td><td>" + p.honor.toLocaleString("en-US") + "</td>"
             + "<td" + (g && g.lv > 0 ? " class='up'" : "") + ">" + gt + "</td><td>" + it + "</td><td><a href='/game/player/" + encodeURIComponent(p.id) + "' title='Open profile'>👤</a></td></tr>";
         }).join("") : "<tr><td colspan='8' style='text-align:center'>Nobody matches these filters.</td></tr>")
-        + "</tbody></table><div class='st'>" + list.length + " of " + Object.keys(r.list.reduce(function (o, p) { o[p.id] = 1; return o; }, {})).length + " searching players shown · scanned " + clock(r.at)
-        + (Date.now() - r.at > 3600000 ? " (over an hour ago)" : "") + ", " + r.total.toLocaleString("en-US") + " players checked.</div>";
+        + "</tbody></table>";
       h += "<div class='st'>Growth: other players' activity points aren't visible, so the scans compare level and honor over time instead. "
         + (s.webhook && s.recruitAlert !== false ? "While the game is open, the scan repeats every " + RECRUIT_EVERY / HOUR + " hours by itself." : "") + "</div>";
     } else if (!recruiting) {
       h += "<div class='st'>The scan reads the whole player ranking, one page after another, so it can take a minute.</div>";
     }
-    h += "<div class='row'><button type='button' class='go' data-rscan" + (recruiting && recruiting.running ? " disabled" : "") + ">" + (r ? "Scan again" : "Find recruits") + "</button>"
-      + (open ? "<button type='button' data-inviteall" + (job && job.running ? " disabled" : "") + ">Invite all (" + open + ")</button>" : "")
-      + (list.length ? "<button type='button' data-copyall>Copy all names</button>" : "")
-      + (list.length && s.webhook ? "<button type='button' data-postrecruits>Post to leadership chat</button>" : "") + "</div>";
     return h;
   }
   function postRecruits() {
@@ -1593,6 +1595,7 @@ function reporter() {
     var a = rankAdvice(s), h = "";
     h += "<div class='st'>Based on the last " + a.days + " saved day" + (a.days === 1 ? "" : "s") + " (of " + ADVICE_DAYS + ") and " + a.wars + " tracked war" + (a.wars === 1 ? "" : "s") + ". Suggestions only; you decide.</div>";
     if (a.days < ADVICE_MIN_DAYS) { h += "<div class='st wait'>Promotions need at least " + ADVICE_MIN_DAYS + " saved days of history (" + a.days + " so far). Capo checks already work.</div>"; }
+    if (s.webhook && (a.ready.length || a.check.length)) { h += "<div class='row'><button type='button' data-postranks>Post to leadership chat</button></div>"; }
     var block = function (title, list, empty) {
       return "<div class='st' style='color:var(--fg)'><b>" + title + "</b></div>" + (list.length ? "<table class='adv'><tbody>" + list.map(function (r) {
         return "<tr><td>" + esc(r.m.name) + " <span class='idle'>" + esc(RANKS[r.m.rank] || r.m.rank) + " · lv " + r.m.level + "</span></td><td>" + esc(a.why(r)) + "</td></tr>";
@@ -1600,7 +1603,6 @@ function reporter() {
     };
     h += block("⬆️ Ready for Capo", a.ready, "Nobody yet: Soldiers need 100+ on 80% of their days and 75% war attendance.");
     h += block("👀 Capos to check", a.check, "All Capos are doing fine.");
-    h += "<div class='row'>" + (s.webhook && (a.ready.length || a.check.length) ? "<button type='button' data-postranks>Post to leadership chat</button>" : "") + "</div>";
     return h;
   }
   function postRanks() {
@@ -2067,6 +2069,10 @@ function reporter() {
     if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ".</div>"; }
     if (scanning && scanning.running) { h += "<div class='st wait'>" + esc(scanning.step) + "</div>"; }
     else if (scanning && scanning.error) { h += "<div class='st bad'>Scan failed: " + esc(scanning.error) + ".</div>"; }
+    // Buttons above the list, so nothing needs scrolling down.
+    h += "<div class='row'><button type='button' class='go' data-scan" + (scanning && scanning.running ? " disabled" : "") + ">" + (sc ? "Scan again" : "Scan targets") + "</button>"
+      + (sc && s.webhook ? "<button type='button' data-postplan>Post to leadership chat</button>" : "")
+      + (sc ? "<span class='idle'>Scanned " + clock(sc.at) + (Date.now() - sc.at > 3600000 ? " (over an hour ago, scan again before deciding)" : "") + "</span>" : "") + "</div>";
     if (sc) {
       var v = planView(s), all = targets(s), ready = all.filter(function (t) { return !t.busy; }).length, rows = plannerRows(s);
       h += "<div class='row filters'><span class='seg'>" + [["all", "All", all.length], ["ready", "Ready", ready], ["busy", "Not ready", all.length - ready]].map(function (o) {
@@ -2076,7 +2082,7 @@ function reporter() {
       }).join("") + "</span></div>";
       h += "<table><thead><tr><th>#</th><th>Family</th><th>Lv</th><th title='Members'>Mem</th><th title='Average member level'>Avg</th><th title='Average level of their top 5'>Top 5</th><th>Honor</th>"
         + "<th title='Win chance. A rough guess from levels until " + LEARN_MIN + " of our wars are logged, then learned from our results.'>Win %</th></tr></thead><tbody>";
-      if (!rows.length) { h += "<tr><td colspan='8' style='text-align:center'>No families " + (v.show === "ready" ? "ready to attack right now." : "under attack right now.") + "</td></tr>"; }
+      if (!rows.length) { h += "<tr><td colspan='8' style='text-align:center'>No families " + (v.show === "ready" ? "ready to attack right now." : v.show === "busy" ? "under attack right now." : "found in our window.") + "</td></tr>"; }
       rows.forEach(function (t) {
         var c = t.ratio ? chance(s, t.ratio) : null, r = t.ratio ? rating(t.ratio, c) : ["⚪", "?"];
         var by = (t.attackedBy || []).join(", "), on = (t.attackingOn || []).join(", ");
@@ -2090,15 +2096,13 @@ function reporter() {
           + "<td>" + (t.honor || 0).toLocaleString("en-US") + "</td><td title='Their strength " + (t.sum ? t.sum.strength.toLocaleString("en-US") : "?") + (t.ratio ? ", we are " + t.ratio.toFixed(2) + "× as strong" : "") + "'>" + r[0] + " "
           + (c != null ? (learned(s) ? "" : "~") + c + "%" : "?") + "</td></tr>";
       });
-      h += "</tbody></table><div class='st'>Scanned " + clock(sc.at) + (Date.now() - sc.at > 3600000 ? " (over an hour ago, scan again before deciding)" : "") + ". "
+      h += "</tbody></table><div class='st'>"
         + "🟢 65%+ · 🟡 40–65% · 🔴 under 40%. "
         + "Strength counts every member by level, since who registers isn't known. "
         + ((s.warLog || []).length >= LEARN_MIN ? "Percentages are learned from our last " + s.warLog.length + " wars." : "~ = rough guess from levels (1.3× stronger ≈ 63%, 2× ≈ 80%) until " + LEARN_MIN + " of our wars are logged (" + (s.warLog || []).length + " so far), then learned from our results.") + "</div>";
     } else if (!scanning) {
       h += "<div class='st'>Scan the families ranked up to " + WINDOW + " places above and below us to see who we can attack and how strong they are. It loads about 20 family pages, one after another (takes ~20 seconds).</div>";
     }
-    h += "<div class='row'><button type='button' class='go' data-scan" + (scanning && scanning.running ? " disabled" : "") + ">" + (sc ? "Scan again" : "Scan targets") + "</button>"
-      + (sc && s.webhook ? "<button type='button' data-postplan>Post to leadership chat</button>" : "") + "</div>";
     return h;
   }
   // One field per member for their Discord account, so milestone posts can ping them.
