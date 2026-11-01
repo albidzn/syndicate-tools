@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.4.0
+// @version      2.4.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.4.0";
+  var VERSION = "2.4.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.4.1": [
+      "Hover tips in the panel work again (war sign-ups, activity tags, war icons and the rest). The panel now shows its own tips, because its frequent refresh kept cancelling the browser's."
+    ],
     "2.4.0": [
       "Activity tab: crosshair and shield next to each name show who is registered for our planned attack and defence, in the member's class colour (grey = not registered).",
       "Activity tab: new \"war sign-ups\" box with how many members are registered for the attack and the defence. Hover it for details."
@@ -2092,7 +2095,7 @@ function reporter() {
     + "#ID .top{display:flex;align-items:center;gap:6px;cursor:move;user-select:none}#ID .grow{flex:1}"
     + "#ID .t{font:600 11px/1.3 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}"
     + "#ID .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 8px}#ID .stats.five{grid-template-columns:repeat(5,1fr);gap:5px}#ID .stats.five .stat{padding:6px 6px}#ID .stats.five .stat b{font-size:20px;white-space:nowrap}"
-    + "#ID .stat b.wk i{display:inline-flex;vertical-align:1px;margin-right:2px;opacity:.85}#ID .stat b.wk i svg{width:12px;height:12px}#ID .stat[title]{cursor:help}"
+    + "#ID .stat b.wk i{display:inline-flex;vertical-align:1px;margin-right:2px;opacity:.85}#ID .stat b.wk i svg{width:12px;height:12px}#ID .stat[data-tip]{cursor:help}"
     + "#ID .war{display:inline-flex;cursor:help}#ID .war.no{color:var(--muted);opacity:.35}"
     + "#ID .stat{background:var(--soft);border-radius:8px;padding:6px 8px}#ID .stat b{display:block;font:normal 22px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);letter-spacing:.02em}#ID .stat span{font-size:10.5px;color:var(--muted)}"
     + "#ID table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}"
@@ -2204,6 +2207,9 @@ function reporter() {
       box.addEventListener("pointercancel", onUp);
       box.addEventListener("dblclick", onDbl);
       box.addEventListener("change", onChange);
+      box.addEventListener("mousemove", function (e) { tipX = e.clientX; tipY = e.clientY; showTip(); });
+      box.addEventListener("mouseleave", function () { tipX = -1; showTip(); });
+      box.addEventListener("scroll", function () { showTip(); });
       document.body.appendChild(box);
     }
     var s = load(), sortBy = SORTS[s.sort] ? s.sort : "today", html = "<style>" + css.replace(/#ID/g, "#" + ID) + "</style>";
@@ -2218,7 +2224,7 @@ function reporter() {
     if (s.min) {
       box.innerHTML = html + "<div class='top' title='Drag to move, double-click to reset'><span class='t'>Activity</span> <b>" + (last ? full + "/" + list.length + " at 100" : "…") + "</b>"
         + "<span class='t'>· reset " + untilReset() + "</span><button type='button' class='icon' data-min title='Expand'>&#9662;</button>" + close + "</div>";
-      place();
+      place(); tipTitles();
       return;
     }
     var view = last && showRecruits ? "recruits" : last && showPlanner ? "planner" : last && showRanks ? "ranks" : "activity";
@@ -2312,9 +2318,45 @@ function reporter() {
     if (backupState === "prompt" && folder) { html += "<div class='st wait'>💾 Today's backup is waiting: the browser wants your OK for the backup folder. <button type='button' data-allowfolder>Allow</button></div>"; }
     html += "<div class='ver'>Activity v" + VERSION + " · day resets 00:00 UTC</div>";
     box.innerHTML = html;
-    place();
+    place(); tipTitles();
   }
   function redraw() { lastKey = ""; tick(); }
+
+  // The panel redraws whenever a number changes (every few seconds in a busy family), and that cancels the browser's own
+  // tooltips before they appear. So titles become data-tip and show in our own tooltip, which outlives the redraws.
+  var tipBox = null, tipX = -1, tipY = -1, tipEl = null, tipTimer = 0, TIP_DELAY = 350;
+  function tipTitles() {
+    [].forEach.call(box.querySelectorAll("[title]"), function (el) { el.setAttribute("data-tip", el.getAttribute("title")); el.removeAttribute("title"); });
+    showTip();
+  }
+  function showTip() {
+    var hit = tipX < 0 || drag ? null : document.elementFromPoint(tipX, tipY), el = hit && hit.closest ? hit.closest("[data-tip]") : null;
+    if (el && !(box && box.contains(el))) { el = null; }
+    var text = el && el.getAttribute("data-tip");
+    if (!text) { tipEl = null; clearTimeout(tipTimer); if (tipBox) { tipBox.style.display = "none"; } return; }
+    var same = tipEl === text; // same tooltip after a redraw: keep it up without waiting again
+    tipEl = text;
+    if (!same || !tipBox || tipBox.style.display === "none") {
+      clearTimeout(tipTimer);
+      if (!same && tipBox) { tipBox.style.display = "none"; }
+      tipTimer = setTimeout(function () { if (tipEl === text) { placeTip(text); } }, same ? 0 : TIP_DELAY);
+      return;
+    }
+    placeTip(text);
+  }
+  function placeTip(text) {
+    if (!tipBox || !document.body.contains(tipBox)) {
+      tipBox = document.createElement("div");
+      tipBox.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;max-width:280px;padding:6px 9px;border-radius:6px;background:rgba(12,8,10,.95);color:#f4e7ea;"
+        + "border:1px solid rgba(255,255,255,.18);font:12px/1.4 system-ui,sans-serif;white-space:pre-line;box-shadow:0 6px 18px rgba(0,0,0,.5)";
+      document.body.appendChild(tipBox);
+    }
+    tipBox.textContent = text;
+    tipBox.style.display = "block";
+    var w = tipBox.offsetWidth, h = tipBox.offsetHeight;
+    var x = Math.max(8, Math.min(tipX + 12, window.innerWidth - w - 8)), y = tipY + 20 + h > window.innerHeight - 8 ? tipY - h - 10 : tipY + 20;
+    tipBox.style.left = x + "px"; tipBox.style.top = Math.max(8, y) + "px";
+  }
   // War planner view: our strength, then every family within ±10 ranks, best targets first; families under attack at the bottom.
   function plannerHtml(s) {
     var sc = s.scan, us = summary(last.fam), h = "";
@@ -2449,7 +2491,7 @@ function reporter() {
     if (a && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.button === 0) { ev.preventDefault(); gameNavigate(a.getAttribute("href")); return; }
     var t = ev.target.closest("button"), s = load();
     if (!t) { return; }
-    if (t.hasAttribute("data-close")) { closed = true; if (box) { box.remove(); box = null; } return; }
+    if (t.hasAttribute("data-close")) { closed = true; if (box) { box.remove(); box = null; } tipX = -1; showTip(); return; }
     if (t.hasAttribute("data-min")) { s.min = !s.min; save(s); redraw(); return; }
     if (t.hasAttribute("data-sort")) { s.sort = t.getAttribute("data-sort"); save(s); redraw(); return; }
     if (t.hasAttribute("data-setup")) { showSetup = !showSetup; redraw(); return; }
@@ -2603,7 +2645,7 @@ function reporter() {
     backfillAttendance();
     catchUpLog();
     keepFresh();
-    if (path !== PAGE || closed) { if (box) { box.remove(); box = null; } lastKey = ""; return; }
+    if (path !== PAGE || closed) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } lastKey = ""; return; }
     if (drag) { return; }
     if (box && document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") { return; } // don't wipe what's being typed
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
