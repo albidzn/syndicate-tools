@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.25
+// @version      1.26
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.25";
+  var VERSION = "1.26";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -635,11 +635,14 @@ function reporter() {
   }
 
   // Backup: everything this script (and the Mission Reader) keeps in this browser, as one file to download and load back.
-  function downloadBackup() {
+  function backupData() {
     var data = { app: "syndicate-tools", version: VERSION, savedAt: new Date().toISOString(), activity: load() };
     try { data.missionReader = JSON.parse(localStorage.getItem("mr-reader") || "null"); } catch (e) {}
+    return data;
+  }
+  function downloadBackup() {
     var a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(backupData())], { type: "application/json" }));
     a.download = "syndicate-tools-backup-" + dayKey(Date.now()) + ".json";
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
@@ -664,6 +667,91 @@ function reporter() {
       rd.readAsText(f);
     };
     inp.click();
+  }
+
+  // Daily backup into a folder the leader picks once ("Choose backup folder" in Discord settings; the browser's folder access).
+  // Once a game day, after yesterday's history is written, it saves syndicate-tools-backup-YYYY-MM-DD.json there and keeps
+  // the newest 30. The folder's handle lives in IndexedDB, since localStorage can't hold it. When the browser wants the
+  // permission confirmed again (after a restart, unless "Allow on every visit" was chosen), the panel shows a button for it:
+  // the browser only asks after a click. backupState: "" (no folder) · "granted" · "prompt" (waiting for that click) · "error".
+  var BACKUP_KEEP = 30, BACKUP_NAME = /^syndicate-tools-backup-\d{4}-\d{2}-\d{2}\.json$/;
+  var folder = null, folderLoaded = false, backupState = "", backupError = "", backupBusy = false, backupCheckAt = 0;
+  function idb(mode, fn) {
+    return new Promise(function (res, rej) {
+      var open = indexedDB.open("syn-activity", 1);
+      open.onupgradeneeded = function () { open.result.createObjectStore("kv"); };
+      open.onerror = function () { rej(open.error); };
+      open.onsuccess = function () {
+        try {
+          var tx = open.result.transaction("kv", mode), req = fn(tx.objectStore("kv"));
+          tx.oncomplete = function () { open.result.close(); res(req.result); };
+          tx.onerror = function () { open.result.close(); rej(tx.error); };
+        } catch (e) { open.result.close(); rej(e); }
+      };
+    });
+  }
+  function loadFolder() {
+    if (folderLoaded || !window.indexedDB) { return Promise.resolve(folder); }
+    return idb("readonly", function (st) { return st.get("backupDir"); }).then(function (h) { folder = h || null; folderLoaded = true; return folder; });
+  }
+  function chooseFolder() {
+    if (!window.showDirectoryPicker) { alert("This browser can't save into a folder. Use \"Download backup\" instead."); return; }
+    window.showDirectoryPicker({ id: "syn-backup", mode: "readwrite" }).then(function (h) {
+      folder = h; folderLoaded = true;
+      return idb("readwrite", function (st) { return st.put(h, "backupDir"); }).then(writeBackup);
+    }).catch(function (e) { if (e && e.name !== "AbortError") { alert("Couldn't use that folder: " + (e.message || e)); } }).then(redraw);
+  }
+  function allowFolder() {
+    if (!folder) { return; }
+    folder.requestPermission({ mode: "readwrite" }).then(function (p) { backupState = p; return p === "granted" ? writeBackup() : null; })
+      .catch(function (e) { backupState = "error"; backupError = String(e && e.message || e); }).then(redraw);
+  }
+  function writeBackup() {
+    var name = "syndicate-tools-backup-" + dayKey(Date.now()) + ".json";
+    return folder.getFileHandle(name, { create: true }).then(function (f) { return f.createWritable(); }).then(function (w) {
+      return w.write(JSON.stringify(backupData())).then(function () { return w.close(); });
+    }).then(function () {
+      var s = load(); s.backupDay = dayKey(dayStart(Date.now())); s.backupAt = Date.now(); s.backupFolder = folder.name; save(s);
+      backupState = "granted"; backupError = "";
+      return pruneBackups();
+    }, function (e) { backupState = "error"; backupError = String(e && e.message || e); });
+  }
+  function pruneBackups() {
+    var names = [], it = folder.keys();
+    function next() { return it.next().then(function (r) { if (r.done) { return; } if (BACKUP_NAME.test(r.value)) { names.push(r.value); } return next(); }); }
+    return next().then(function () {
+      names.sort();
+      return Promise.all(names.slice(0, Math.max(0, names.length - BACKUP_KEEP)).map(function (n) { return folder.removeEntry(n); }));
+    }).catch(function () {});
+  }
+  function autoBackup() {
+    var s = load(), mid = dayStart(Date.now());
+    if (!folderLoaded && !backupBusy && window.indexedDB) { // so the settings can show the folder before the day's backup is due
+      backupBusy = true;
+      loadFolder().catch(function () { folderLoaded = true; }).then(function () { backupBusy = false; redraw(); });
+      return;
+    }
+    if (backupBusy || s.backupDay === dayKey(mid) || !last || last.at < mid + GRACE || Date.now() < backupCheckAt) { return; }
+    backupBusy = true; backupCheckAt = Date.now() + 60000;
+    loadFolder().then(function (h) {
+      if (!h) { backupState = ""; return; }
+      return h.queryPermission({ mode: "readwrite" }).then(function (p) {
+        var was = backupState; backupState = p;
+        if (p === "granted") { return writeBackup(); }
+        if (was !== p) { redraw(); }
+      });
+    }).catch(function (e) { backupState = "error"; backupError = String(e && e.message || e); })
+      .then(function () { backupBusy = false; });
+  }
+  function backupHtml(s) {
+    var at = s.backupAt ? new Date(s.backupAt).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+    return "<div style='margin-top:10px'><b>Daily backup to a folder</b>"
+      + "<div style='font-size:11.5px;color:var(--muted)'>" + (s.backupFolder && folder
+        ? "Saving to the folder <b>" + esc(s.backupFolder) + "</b> once a day" + (at ? ", last on " + esc(at) : "") + ". The newest " + BACKUP_KEEP + " are kept."
+        : "Once a day, a backup file is saved into a folder you pick on this PC (the newest " + BACKUP_KEEP + " are kept).")
+      + (backupState === "error" ? " <span style='color:#ff8a8a'>Last try failed: " + esc(backupError) + "</span>" : "") + "</div>"
+      + "<div class='row' style='margin-top:4px'><button type='button' data-pickfolder>" + (folder ? "Change folder" : "Choose backup folder") + "</button>"
+      + (folder ? "<button type='button' data-backupnow>Save a backup now</button>" : "") + "</div></div>";
   }
 
   // Leaderboard: one Discord message on its own webhook, edited in place every few minutes while the game is open.
@@ -1872,6 +1960,7 @@ function reporter() {
     if (showSetup) {
       html += "<div class='setup'>Only one leader needs these. Each Discord channel gets its own webhook: open the channel's settings (gear icon) → <b>Integrations</b> → <b>Webhooks</b> → <b>New Webhook</b> → <b>Copy Webhook URL</b>, and paste it below."
         + "<div class='row'><button type='button' data-backup>Download backup</button><button type='button' data-restore>Restore backup</button></div>"
+        + backupHtml(s)
         + "<div style='font-size:11.5px;color:var(--muted);margin-top:4px'>The backup holds the webhooks, Discord links and history. Keep it private: anyone with it can post in your channels.</div>"
         + hookBlock("report", "Leadership chat: daily report, weekly summary (Mondays), join / leave / inactive alerts", s.webhook, s.webhook ? "<button type='button' data-weekly" + (sending ? " disabled" : "") + ">Send weekly summary</button>" : "")
         + hookBlock("board", "Leaderboard (one message, kept up to date, with family level)", s.boardHook, "")
@@ -1894,6 +1983,7 @@ function reporter() {
         }).join("") + "</div></div>"
         + "</div>";
     }
+    if (backupState === "prompt" && folder) { html += "<div class='st wait'>💾 Today's backup is waiting: the browser wants your OK for the backup folder. <button type='button' data-allowfolder>Allow</button></div>"; }
     html += "<div class='ver'>Activity v" + VERSION + " · day resets 00:00 UTC</div>";
     box.innerHTML = html;
     place();
@@ -2033,6 +2123,12 @@ function reporter() {
       s.autoBoost[ab] = !s.autoBoost[ab]; save(s); redraw(); return;
     }
     if (t.hasAttribute("data-backup")) { downloadBackup(); return; }
+    if (t.hasAttribute("data-pickfolder")) { chooseFolder(); return; }
+    if (t.hasAttribute("data-allowfolder")) { allowFolder(); return; }
+    if (t.hasAttribute("data-backupnow")) {
+      if (backupState === "granted") { writeBackup().then(function () { redraw(); if (backupState === "granted") { alert("Backup saved."); } }); } else { allowFolder(); }
+      return;
+    }
     if (t.hasAttribute("data-restore")) { restoreBackup(); return; }
     if (t.hasAttribute("data-links")) { showLinks = !showLinks; redraw(); return; }
     if (t.hasAttribute("data-home")) { showPlanner = showRecruits = showRanks = false; redraw(); return; }
@@ -2144,6 +2240,7 @@ function reporter() {
     checkBoosts();
     checkAutoBoost();
     checkDonations();
+    autoBackup();
     checkDebriefs();
     checkEvening();
     autoRecruits();
