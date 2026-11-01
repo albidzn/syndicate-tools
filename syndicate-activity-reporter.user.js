@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.31
+// @version      1.32
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.31";
+  var VERSION = "1.32";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -1915,6 +1915,8 @@ function reporter() {
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
+    + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
+    + "#ID .tabs button{flex:1;padding:6px 4px;border-color:transparent;text-transform:none;letter-spacing:0;font-size:12px;white-space:nowrap}#ID .tabs button:hover{border-color:var(--strong)}#ID .tabs button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .setup{margin-top:10px;padding:10px;border:1px solid var(--strong);border-radius:8px;font-size:12.5px}#ID .setup ol{margin:4px 0 8px;padding-left:18px}"
     + "#ID input{width:100%;margin:4px 0 8px;padding:7px 8px;border-radius:6px;border:1px solid var(--strong);background:var(--input);color:var(--fg);font:12px ui-monospace,Consolas,monospace}"
     + "#ID .ver{margin-top:6px;text-align:right;font-size:10px;color:var(--muted)}";
@@ -1971,6 +1973,12 @@ function reporter() {
     html += "<div class='top' title='Drag to move, double-click to reset'><span class='t grow'>" + ({ recruits: "Recruits", planner: "War planner", ranks: "Rank suggestions", activity: "Family activity" }[view]) + "</span>"
       + (view !== "activity" ? "" : "<span class='seg'>" + Object.keys(SORTS).map(function (k) { return "<button type='button' data-sort='" + k + "' class='" + (k === sortBy ? "on" : "") + "'>" + SORTS[k] + "</button>"; }).join("") + "</span>")
       + "<button type='button' class='icon' data-min title='Minimize'>&ndash;</button>" + close + "</div>";
+    // The views as tabs right under the title, so switching never needs scrolling.
+    if (last) {
+      html += "<div class='tabs'>" + [["activity", "data-home", "📊 Activity"], ["planner", "data-planner", "⚔️ War planner"], ["recruits", "data-recruits", "🧲 Recruits"], ["ranks", "data-ranks", "👑 Ranks"]].map(function (o) {
+        return "<button type='button' " + o[1] + (view === o[0] ? " class='on'" : "") + ">" + o[2] + "</button>";
+      }).join("") + "</div>";
+    }
     if (view === "recruits") {
       html += recruitHtml(s);
     } else if (view === "ranks") {
@@ -2015,11 +2023,7 @@ function reporter() {
         : "🏆 Leaderboard " + (s.boardAt ? "updated " + clock(s.boardAt) : "goes up in a moment") + ".") + "</div>" : "")
       + "<div class='row'>"
       + (s.webhook && last ? "<button type='button' data-send" + (sending ? " disabled" : "") + ">" + (s.sentDay === dayKey(dayStart(Date.now()) - 1) ? "Send report again" : "Send report now") + "</button>" : "")
-      + (last ? (view !== "activity" ? "<button type='button' data-home>Back to activity</button>" : "")
-        + (view !== "planner" ? "<button type='button' data-planner>⚔️ War planner</button>" : "")
-        + (view !== "recruits" ? "<button type='button' data-recruits>🧲 Recruits</button>" : "")
-        + (view !== "ranks" ? "<button type='button' data-ranks>👑 Ranks</button>" : "") : "")
-      + "<button type='button' data-setup>Discord settings</button></div>";
+      + "<button type='button' data-setup>" + (showSetup ? "Hide Discord settings" : "Discord settings") + "</button></div>";
     if (showSetup) {
       html += "<div class='setup'>Only one leader needs these. Each Discord channel gets its own webhook: open the channel's settings (gear icon) → <b>Integrations</b> → <b>Webhooks</b> → <b>New Webhook</b> → <b>Copy Webhook URL</b>, and paste it below."
         + "<div class='row'><button type='button' data-backup>Download backup</button><button type='button' data-restore>Restore backup</button></div>"
