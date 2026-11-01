@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.29
+// @version      1.30
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.29";
+  var VERSION = "1.30";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -1151,6 +1151,12 @@ function reporter() {
         if (Array.isArray(r.f[side])) { return r.f[side].map(function (x) { return nameOf(x[other]); }); }
         return r.f._count && r.f._count[side] > 0 ? ["?"] : [];
       };
+      // When a family under attack can be attacked again: once its battle has been fought, at the latest start of the wars
+      // against it (the game has no extra cooldown after a war). 0 when the start isn't known.
+      var freeAt = function (r) {
+        var list = r.page && Array.isArray(r.page.scheduledWars) ? r.page.scheduledWars.filter(function (w) { return w.defenderId === r.f.id; }) : Array.isArray(r.f.defenses) ? r.f.defenses : [];
+        return list.reduce(function (a, w) { return Math.max(a, startOf(w) || 0); }, 0);
+      };
       var s = load();
       s.scan = {
         at: Date.now(), own: own, us: summary(last.fam),
@@ -1158,7 +1164,7 @@ function reporter() {
           var by = wars(r, "defenses"), on = wars(r, "attacks");
           return {
             id: r.f.id, name: r.f.name, rank: r.rank, level: r.page && typeof r.page.level === "number" ? r.page.level : r.f.level, honor: r.f.honor,
-            members: r.f._count && r.f._count.members || r.sum && r.sum.members, attacked: by.length > 0, attackedBy: by, attacking: on.length > 0, attackingOn: on, sum: r.sum
+            members: r.f._count && r.f._count.members || r.sum && r.sum.members, attacked: by.length > 0, attackedBy: by, freeAt: by.length ? freeAt(r) : 0, attacking: on.length > 0, attackingOn: on, sum: r.sum
           };
         })
       };
@@ -1168,19 +1174,31 @@ function reporter() {
   function targets(s) {
     var sc = s.scan;
     if (!sc) { return []; }
-    return sc.list.map(function (t) { t.ratio = t.sum && t.sum.strength ? sc.us.strength / t.sum.strength : null; return t; })
-      .sort(function (a, b) { return (a.attacked - b.attacked) || ((b.ratio || 0) - (a.ratio || 0)); });
+    // busy: still under attack. A family whose battle time has passed since the scan counts as free again.
+    return sc.list.map(function (t) {
+      t.ratio = t.sum && t.sum.strength ? sc.us.strength / t.sum.strength : null;
+      t.busy = t.attacked && !(t.freeAt && t.freeAt <= Date.now());
+      return t;
+    }).sort(function (a, b) { return (a.busy - b.busy) || ((b.ratio || 0) - (a.ratio || 0)); });
+  }
+  // "in 3h 20m (21:40)"
+  function inTime(t) {
+    var m = Math.max(0, Math.round((t - Date.now()) / 60000));
+    return "in " + (m >= 60 ? Math.floor(m / 60) + "h " : "") + (m % 60) + "m (" + clock(t) + ")";
   }
   function postPlanner() {
     var s = load(), sc = s.scan;
     if (!s.webhook || !sc) { return Promise.resolve(); }
-    var list = targets(s), open = list.filter(function (t) { return !t.attacked; }), busyOnes = list.filter(function (t) { return t.attacked; });
+    var list = targets(s), open = list.filter(function (t) { return !t.busy; }), busyOnes = list.filter(function (t) { return t.busy; });
     var line = function (t) {
       var c = t.ratio ? chance(s, t.ratio) : null, r = t.ratio ? rating(t.ratio, c) : ["⚪", "unknown"];
       return "`#" + t.rank + "` " + r[0] + " **" + md(t.name) + "** — " + (c != null ? "~" + c + "% (" + t.ratio.toFixed(2) + "×)" : "?")
         + " · lv " + (t.level || "?") + " · " + (t.members || "?") + " members" + (t.sum ? " · avg lv " + t.sum.avg + " · top 5 " + t.sum.top5 : "") + " · honor " + (t.honor || 0).toLocaleString("en-US");
     };
-    var text = open.map(line).join("\n") + (busyOnes.length ? "\n\n🚫 **Already under attack:** " + busyOnes.map(function (t) { var by = (t.attackedBy || []).filter(function (n) { return n !== "?"; }); return "#" + t.rank + " " + md(t.name) + (by.length ? " (by " + md(by.join(", ")) + ")" : ""); }).join(", ") : "");
+    var text = open.map(line).join("\n") + (busyOnes.length ? "\n\n🚫 **Already under attack** (attackable again after their battle):\n" + busyOnes.slice().sort(function (a, b) { return (a.freeAt || Infinity) - (b.freeAt || Infinity); }).map(function (t) {
+      var by = (t.attackedBy || []).filter(function (n) { return n !== "?"; });
+      return "`#" + t.rank + "` " + md(t.name) + (by.length ? " (by " + md(by.join(", ")) + ")" : "") + (t.freeAt ? " · free <t:" + Math.round(t.freeAt / 1000) + ":R>" : "");
+    }).join("\n") : "");
     return postFor("planner", s.webhook, {
       username: "Syndicate Wars", allowed_mentions: { parse: [] },
       embeds: [{
@@ -1866,6 +1884,7 @@ function reporter() {
     + "#ID .filters label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}#ID .filters input{width:64px;margin:0;padding:5px 6px}"
     + "#ID button.name{border:0;padding:0;background:none;font:inherit;text-transform:none;letter-spacing:0;color:var(--fg);cursor:copy;text-align:left}#ID button.name:hover{color:var(--accent)}#ID td a{text-decoration:none}"
     + "#ID button.inv{margin:0;padding:2px 8px;font-size:10.5px}#ID .invd{font-size:11px;color:var(--up);white-space:nowrap;cursor:help}#ID tr.done td:nth-child(2){opacity:.6}"
+    + "#ID .free{display:inline-block;font-size:11px;color:var(--up);white-space:nowrap}#ID tr.off .free{opacity:1}#ID .free.now{color:#93d36d}#ID tr.off td:nth-child(2){opacity:1}#ID tr.off td:nth-child(2) > :not(.free){opacity:.45}"
     + "#ID .top{display:flex;align-items:center;gap:6px;cursor:move;user-select:none}#ID .grow{flex:1}"
     + "#ID .t{font:600 11px/1.3 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}"
     + "#ID .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 8px}"
@@ -2028,7 +2047,7 @@ function reporter() {
       + "<div class='stat'><b>" + us.avg + "</b><span>avg member level</span></div>"
       + "<div class='stat'><b>" + (sc ? "#" + sc.own : "–") + "</b><span>our rank" + (sc ? " (can attack " + Math.max(1, sc.own - WINDOW) + "–" + (sc.own + WINDOW) + ")" : "") + "</span></div></div>";
     var ours = warsOf(last.fam).filter(function (w) { return w.status === "preparing" && w.attackerId === last.fam.id; });
-    if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + ".</div>"; }
+    if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ".</div>"; }
     if (scanning && scanning.running) { h += "<div class='st wait'>" + esc(scanning.step) + "</div>"; }
     else if (scanning && scanning.error) { h += "<div class='st bad'>Scan failed: " + esc(scanning.error) + ".</div>"; }
     if (sc) {
@@ -2037,8 +2056,11 @@ function reporter() {
       targets(s).forEach(function (t) {
         var c = t.ratio ? chance(s, t.ratio) : null, r = t.ratio ? rating(t.ratio, c) : ["⚪", "?"];
         var by = (t.attackedBy || []).join(", "), on = (t.attackingOn || []).join(", ");
-        h += "<tr" + (t.attacked ? " class='off'" : "") + "><td>" + t.rank + "</td><td>" + esc(t.name)
-          + (t.attacked ? " <span class='idle' title='Already under attack" + (by && by !== "?" ? " by " + esc(by) : "") + ": it can&#39;t be attacked right now'>under attack" + (by && by !== "?" ? " by " + esc(by) : "") + "</span>"
+        var byText = by && by !== "?" ? " by " + esc(by) : "";
+        h += "<tr" + (t.busy ? " class='off'" : "") + "><td>" + t.rank + "</td><td><span>" + esc(t.name) + "</span>"
+          + (t.busy ? " <span class='idle' title='Already under attack" + byText + ": it can&#39;t be attacked until that battle is fought'>under attack" + byText + "</span>"
+            + (t.freeAt ? " <span class='free'>⏳ free " + inTime(t.freeAt) + "</span>" : "")
+            : t.attacked ? " <span class='free now'>✅ free since " + clock(t.freeAt) + "</span>"
             : t.attacking ? " <span class='idle'>attacking" + (on && on !== "?" ? " " + esc(on) : "") + "</span>" : "") + "</td>"
           + "<td>" + (t.level || "?") + "</td><td>" + (t.members || "?") + "</td><td>" + (t.sum ? t.sum.avg : "?") + "</td><td>" + (t.sum ? t.sum.top5 : "?") + "</td>"
           + "<td>" + (t.honor || 0).toLocaleString("en-US") + "</td><td title='Their strength " + (t.sum ? t.sum.strength.toLocaleString("en-US") : "?") + (t.ratio ? ", we are " + t.ratio.toFixed(2) + "× as strong" : "") + "'>" + r[0] + " "
