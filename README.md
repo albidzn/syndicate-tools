@@ -25,6 +25,7 @@ Discord webhook links, member links and history are saved only in each browser, 
    - **patch** (2.0.0 → 2.0.1) for fixes and small tweaks,
    - **minor** (2.0.1 → 2.1.0) for new features,
    - **major** (2.x → 3.0.0) only for big redesigns.
-3. Commit and push to `main`. Everyone gets the new version with the next update check.
+3. Add a short entry for the new version to `CHANGES` near the top of the script. The first time the new version runs on the PC with the leadership webhook, these notes are posted to the leadership chat.
+4. Commit and push to `main`. Everyone gets the new version with the next update check.
 
 The Mission Reader has no automatic updates: after a change, raise its `VERSION`, and members re-add the bookmark from the new file.

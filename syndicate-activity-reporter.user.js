@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.0.0
+// @version      2.1.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,15 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.0.0";
+  var VERSION = "2.1.0";
+  // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
+  var CHANGES = {
+    "2.1.0": [
+      "War attendance follows the game's 12-hour rule: a member only counts wars declared at least 12 hours after they joined. Past wars are recounted.",
+      "Activity tab: click a member's name to open their profile, without a page reload.",
+      "New versions are announced here, like this one."
+    ]
+  };
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -96,7 +104,8 @@ function reporter() {
     return fam.members.map(function (m) {
       return {
         id: String(m.userId != null ? m.userId : m.name), name: String(m.name || "?"), level: +m.level || 0,
-        yesterday: +m.yesterday || 0, today: +m.today || 0, gold: +m.donatedGold || 0, online: !!m.online, rank: m.rank || ""
+        yesterday: +m.yesterday || 0, today: +m.today || 0, gold: +m.donatedGold || 0, online: !!m.online, rank: m.rank || "",
+        joinedAt: m.joinedAt ? +new Date(m.joinedAt) || 0 : 0
       };
     });
   }
@@ -623,7 +632,11 @@ function reporter() {
     list.forEach(function (m) { now[m.id] = m.name; });
     if (!s.roster) { s.roster = now; save(s); return; } // first look stays quiet
     var oldRoster = s.roster, oldIdle = JSON.parse(JSON.stringify(s.idleSaid || {}));
-    list.forEach(function (m) { if (!oldRoster[m.id]) { lines.push("➕ **" + md(m.name) + "** joined the family (level " + m.level + ")."); } });
+    list.forEach(function (m) {
+      if (oldRoster[m.id]) { return; }
+      lines.push("➕ **" + md(m.name) + "** joined the family (level " + m.level + ").");
+      s.joinSeen = s.joinSeen || {}; s.joinSeen[m.id] = Date.now(); changed = true; // for the war attendance, if the game doesn't say
+    });
     Object.keys(oldRoster).forEach(function (id) { if (!(id in now)) { lines.push("➖ **" + md(oldRoster[id]) + "** left the family."); } });
     if (JSON.stringify(oldRoster) !== JSON.stringify(now)) { s.roster = now; changed = true; }
     s.idleSaid = s.idleSaid || {};
@@ -1575,7 +1588,7 @@ function reporter() {
   // Check: 3+ days in a row at 0, under 40% of days at 100+, or (with 3+ wars) fought in under a third.
   var RANKS = { soldier: "Soldier", capo: "Capo", counselor: "Counselor", godfather: "Godfather" }, ADVICE_DAYS = 30, ADVICE_MIN_DAYS = 7;
   function rankAdvice(s) {
-    var h = s.hist || {}, mid = dayStart(Date.now()), keys = [], att = s.attend || {};
+    var h = s.hist || {}, mid = dayStart(Date.now()), keys = [], att = attendance(s, members(last.fam));
     for (var i = 1; i <= ADVICE_DAYS; i++) { keys.push(dayKey(mid - i * DAY)); }
     var rows = members(last.fam).map(function (m) {
       var rec = keys.filter(function (k) { return h[k] && h[k][m.id]; }), full = rec.filter(function (k) { return h[k][m.id].ap >= FULL; }).length, a = att[m.id] || { fought: 0, wars: 0 };
@@ -1758,7 +1771,7 @@ function reporter() {
   // After a war's result is posted, its replay is loaded: fighters duel one at a time, and the winner stays in
   // with the health they have left. Per fighter: duels won (round_result), damage (attack/consumable), biggest hit, crits.
   // War channel: MVP (pinged if linked) and every fighter of ours. Leadership chat: who didn't fight, and attendance so far.
-  // s.wars[id].debrief marks it done; s.attend = {member id: {fought, wars}}.
+  // s.wars[id].debrief marks it done; who fought is kept per war in s.warFought (see War attendance below).
   function fighterId(f) { return String(f.id != null ? f.id : f.character && f.character.id); }
   function fighterName(f) { return f.name || f.login || f.character && (f.character.name || f.character.login) || "#" + fighterId(f); }
   function fighterLevel(f) { return +(f.level || f.character && f.character.level) || 0; }
@@ -1797,13 +1810,91 @@ function reporter() {
     r.warIds[w.id] = true;
     r.wars[w.winnerId === fam.id ? "won" : "lost"]++;
   }
+  // ===== War attendance =====
+  // The game lets a member fight only if they had been in the family for 12 hours when the war was declared (it says
+  // "You needed 12 hours of membership when this war was declared"); a war is declared 10 hours before its battle.
+  // So attendance counts, per member, only the wars they could have joined. s.warFought = {war id: {at: declared, ids: [member ids who fought]}};
+  // the join time comes from the game's member data (joinedAt), or else from when the script first saw them join (s.joinSeen).
+  var WAR_WAIT_HOURS = 12, WAR_PREP_HOURS = 10;
+  function declaredAt(w) { return +new Date(w.declaredAt || w.createdAt || 0) || startOf(w) - WAR_PREP_HOURS * HOUR; }
+  function joinTime(s, m) { return m.joinedAt || s.joinSeen && s.joinSeen[m.id] || 0; }
+  function couldFight(s, m, at) { var j = joinTime(s, m); return !j || j + WAR_WAIT_HOURS * HOUR <= at; } // unknown join time: counted
+  function recordFought(s, fam, w, us) {
+    var ids = [];
+    us.forEach(function (x) { var m = fighterMember(fam, x); if (m && ids.indexOf(m.id) < 0) { ids.push(m.id); } });
+    if (!ids.length) { return false; } // fighters couldn't be matched to members
+    s.warFought = s.warFought || {};
+    s.warFought[w.id] = { at: declaredAt(w), ids: ids };
+    return true;
+  }
+  // {member id: {fought, wars}} over the recorded wars each member could have joined. Before any war is recorded per war,
+  // the old running count (s.attend, kept by versions before 2.1.0) is used.
+  function attendance(s, list) {
+    var wf = s.warFought, o = {};
+    if (!wf || !Object.keys(wf).length) { return s.attend || {}; }
+    list.forEach(function (m) {
+      var a = o[m.id] = { fought: 0, wars: 0 };
+      Object.keys(wf).forEach(function (id) {
+        if (!couldFight(s, m, wf[id].at)) { return; }
+        a.wars++; if (wf[id].ids.indexOf(m.id) >= 0) { a.fought++; }
+      });
+    });
+    return o;
+  }
+  // One-time: the wars in the game's list, recorded per war from their replays, so past attendance follows the 12-hour rule too.
+  var attendFilling = false, attendNext = 0;
+  function backfillAttendance() {
+    var s0 = load();
+    if (attendFilling || !last || !last.fam.private || !s0.webhook || s0.attendFilled || Date.now() < attendNext) { return; }
+    attendFilling = true; attendNext = Date.now() + 5 * 60000; // a failed try waits 5 minutes (redraw() runs this again at once)
+    var fam = last.fam;
+    familyQueries().then(function (q) {
+      if (!q.war) { return false; }
+      var todo = warsOf(fam).filter(function (w) { return w.status === "finished" && !(s0.warFought && s0.warFought[w.id]); }), ok = true;
+      return todo.reduce(function (chain, w, i) {
+        return chain.then(function () { return i ? wait(SCAN_GAP) : null; }).then(function () { return warDetail(w.id); }).then(function (det) {
+          if (!det || !det.replay || !det.replay.events || !det.replay.events.length) { return; }
+          var s2 = load(); if (recordFought(s2, fam, w, fighterStats(fam, w, det.replay).us)) { save(s2); }
+        }).catch(function () { ok = false; });
+      }, Promise.resolve()).then(function () { return ok; });
+    }).then(function (ok) {
+      if (ok) { var s3 = load(); s3.attendFilled = true; save(s3); }
+    }).catch(function () {}).then(function () { attendFilling = false; redraw(); });
+  }
+
+  // ===== Update notes =====
+  // The first time a new version runs on a PC with the leadership webhook, it posts the CHANGES since the version that
+  // ran before (s.lastVersion). Versions are major.minor.patch.
+  function verCmp(a, b) {
+    var x = String(a).split("."), y = String(b).split(".");
+    for (var i = 0; i < Math.max(x.length, y.length); i++) { var d = (+x[i] || 0) - (+y[i] || 0); if (d) { return d; } }
+    return 0;
+  }
+  function announceVersion() {
+    var s = load();
+    if (!s.webhook || !last || s.lastVersion === VERSION || !canPost("version")) { return; }
+    var was = s.lastVersion, since = was || "0";
+    var vers = Object.keys(CHANGES).filter(function (v) { return verCmp(v, since) > 0 && verCmp(v, VERSION) <= 0; }).sort(verCmp).reverse();
+    s.lastVersion = VERSION; save(s); // saved before posting so a second game tab doesn't post it too
+    if (!vers.length) { return; }
+    postFor("version", s.webhook, {
+      username: "Syndicate Activity", allowed_mentions: { parse: [] },
+      embeds: [{
+        title: "🆕 Syndicate tools updated to v" + VERSION,
+        description: vers.map(function (v) { return (vers.length > 1 ? "**v" + v + "**\n" : "") + CHANGES[v].map(function (c) { return "• " + c; }).join("\n"); }).join("\n\n").slice(0, 4000),
+        color: 0x5865f2,
+        footer: { text: "Installed automatically by Tampermonkey" + (was ? " · was v" + was : "") }
+      }]
+    }, function () { var n = load(); if (was) { n.lastVersion = was; } else { delete n.lastVersion; } save(n); });
+  }
+
   // One-time catch-up for the wars in the game's list from before the records counted them: won/lost for every finished
   // war, and each war's MVP from its replay, loaded one at a time. Counts made by v1.19 (without war ids) are redone here.
-  var backfilling = false;
+  var backfilling = false, backfillNext = 0;
   function backfillWars() {
     var s0 = load();
-    if (backfilling || !last || !last.fam.private || !(s0.boardHook || s0.warHook) || s0.records && s0.records.backfilled) { return; }
-    backfilling = true;
+    if (backfilling || !last || !last.fam.private || !(s0.boardHook || s0.warHook) || s0.records && s0.records.backfilled || Date.now() < backfillNext) { return; }
+    backfilling = true; backfillNext = Date.now() + 5 * 60000; // a failed try waits 5 minutes (redraw() runs this again at once)
     var fam = last.fam;
     familyQueries().then(function (q) {
       if (!q.war) { return false; } // the game's war loader isn't available yet: try again later
@@ -1843,15 +1934,16 @@ function reporter() {
       + "\n\n-# Fighters: us " + us.length + " vs them " + them.length + " · duels fight one at a time, the winner stays in";
     var warMsg = { username: "Syndicate Wars", allowed_mentions: { parse: [], users: users.slice(0, 1) },
       content: text.slice(0, 2000), embeds: [{ description: desc.slice(0, 4000), color: won ? 0x00cc00 : 0xcc0000 }] };
-    // Attendance: which current members fought.
-    var fought = {};
-    us.forEach(function (x) { var m = member(x); if (m) { fought[m.id] = true; } });
-    var list = members(fam), att = s.attend = s.attend || {};
-    if (!Object.keys(fought).length) { return { war: warMsg, lead: null }; } // fighters couldn't be matched to members
-    list.forEach(function (m) { var a = att[m.id] = att[m.id] || { fought: 0, wars: 0 }; a.wars++; if (fought[m.id]) { a.fought++; } });
-    var missing = list.filter(function (m) { return !fought[m.id]; });
-    var leadMsg = shout("🪖 **War attendance · " + (won ? "won" : "lost") + " vs " + foe + "**: " + Object.keys(fought).length + " of " + list.length + " fought."
-      + (missing.length ? "\nDidn't fight: " + missing.map(function (m) { var a = att[m.id]; return "**" + md(m.name) + "** (" + a.fought + "/" + a.wars + " wars)"; }).join(", ") : "\nEveryone fought! 💪"));
+    // Attendance: which current members fought, out of those who were allowed to (12 hours in the family when it was declared).
+    if (!recordFought(s, fam, w, us)) { return { war: warMsg, lead: null }; } // fighters couldn't be matched to members
+    var ids = s.warFought[w.id].ids, at = s.warFought[w.id].at, list = members(fam), att = attendance(s, list);
+    var allowed = list.filter(function (m) { return couldFight(s, m, at); }), tooNew = list.filter(function (m) { return !couldFight(s, m, at); });
+    var missing = allowed.filter(function (m) { return ids.indexOf(m.id) < 0; });
+    var foughtN = allowed.length - missing.length;
+    var leadMsg = shout("🪖 **War attendance · " + (won ? "won" : "lost") + " vs " + foe + "**: " + foughtN + " of " + allowed.length + " fought"
+      + (tooNew.length ? " (" + tooNew.length + " too new to fight)" : "") + "."
+      + (missing.length ? "\nDidn't fight: " + missing.map(function (m) { var a = att[m.id] || { fought: 0, wars: 0 }; return "**" + md(m.name) + "** (" + a.fought + "/" + a.wars + " wars)"; }).join(", ") : "\nEveryone who could fight did! 💪")
+      + (tooNew.length ? "\n-# Too new: " + tooNew.map(function (m) { return md(m.name); }).join(", ") + ". Members need " + WAR_WAIT_HOURS + " hours in the family when a war is declared; this war doesn't count for them." : ""));
     return { war: warMsg, lead: leadMsg };
   }
   var DEBRIEF_TRIES = 6, DEBRIEF_GAP = 5 * 60 * 1000;
@@ -1897,7 +1989,7 @@ function reporter() {
     + "#ID *{box-sizing:border-box}#ID.min{width:auto;padding:8px 10px}#ID.dragging{opacity:.9}"
     + "#ID.wide{width:min(620px,calc(100vw - 24px))}#ID tr.off td{opacity:.45}"
     + "#ID .filters label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}#ID .filters input{width:64px;margin:0;padding:5px 6px}"
-    + "#ID button.name{border:0;padding:0;background:none;font:inherit;text-transform:none;letter-spacing:0;color:var(--fg);cursor:copy;text-align:left}#ID button.name:hover{color:var(--accent)}#ID td a{text-decoration:none}"
+    + "#ID button.name{border:0;padding:0;background:none;font:inherit;text-transform:none;letter-spacing:0;color:var(--fg);cursor:copy;text-align:left}#ID button.name:hover{color:var(--accent)}#ID td a{text-decoration:none}#ID a.who{color:inherit}#ID a.who:hover{color:var(--accent);text-decoration:underline}"
     + "#ID button.inv{margin:0;padding:2px 8px;font-size:10.5px}#ID .invd{font-size:11px;color:var(--up);white-space:nowrap;cursor:help}#ID tr.done td:nth-child(2){opacity:.6}"
     + "#ID .free{display:inline-block;font-size:11px;color:var(--up);white-space:nowrap}#ID tr.off .free{opacity:1}#ID .free.now{color:#93d36d}#ID tr.off td:nth-child(2){opacity:1}#ID tr.off td:nth-child(2) > :not(.free){opacity:.45}"
     + "#ID .top{display:flex;align-items:center;gap:6px;cursor:move;user-select:none}#ID .grow{flex:1}"
@@ -2003,7 +2095,8 @@ function reporter() {
       var mid = dayStart(Date.now());
       list.forEach(function (m, i) {
         var idle = idleDays(s, m.id, mid);
-        html += "<tr><td>" + (i + 1) + "</td><td><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>" + esc(m.name)
+        html += "<tr><td>" + (i + 1) + "</td><td><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>"
+          + (/^\d+$/.test(m.id) ? "<a class='who' href='/game/player/" + m.id + "' title='Open profile'>" + esc(m.name) + "</a>" : esc(m.name))
           + (idle >= 2 ? " <span class='idle' title='" + idle + " days in a row with 0 points'>💤" + idle + "d</span>" : "") + "</td>"
           + "<td class='" + apClass(m.today) + "'>" + m.today + "</td><td class='" + apClass(m.yesterday) + "'>" + m.yesterday + "</td><td>" + m.level + "</td>"
           + "<td class='" + (m.levels > 0 ? "up" : "") + "'>" + (m.levels == null ? "" : m.levels > 0 ? "+" + m.levels : "–") + "</td></tr>";
@@ -2018,7 +2111,7 @@ function reporter() {
       + (lvError ? "<div class='st bad'>Couldn't post a level milestone: " + esc(lvError) + ". Trying again in a few minutes.</div>" : "")
       + (apError ? "<div class='st bad'>Couldn't post an activity shout-out: " + esc(apError) + ". Trying again in a few minutes.</div>" : "")
       + Object.keys(fails).map(function (k) {
-        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out" }[k] || k)
+        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
           + ": " + esc(fails[k]) + ". Trying again in a few minutes.</div>";
       }).join("")
       + (s.boardHook ? "<div class='st " + (boardError ? "bad" : "ok") + "'>" + (boardError ? "Couldn't update the leaderboard: " + esc(boardError) + "."
@@ -2318,6 +2411,7 @@ function reporter() {
     checkWars();
     updateBoard();
     checkMilestones();
+    announceVersion();
     checkActivity();
     checkLevelRush();
     checkStreaks();
@@ -2333,6 +2427,7 @@ function reporter() {
     autoRecruits();
     checkRecord();
     backfillWars();
+    backfillAttendance();
     catchUpLog();
     keepFresh();
     if (path !== PAGE || closed) { if (box) { box.remove(); box = null; } lastKey = ""; return; }
