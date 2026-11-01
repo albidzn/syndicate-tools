@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.24
+// @version      1.25
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.24";
+  var VERSION = "1.25";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -978,12 +978,12 @@ function reporter() {
 
   // Loading other families and war replays goes through the game's own queries (the options factories exported by its
   // family-*.js module, found by their source), so the requests are exactly what the game sends when you click around.
-  // famQueries = {family: (params) => options, war: (warId) => options}
+  // famQueries = {family: (params) => options, war: (warId) => options, account: (familyId) => options (treasury ledger)}
   var famQueries = null, famQueriesLoading = null;
   function familyQueries() {
-    if (famQueries && famQueries.family && famQueries.war) { return Promise.resolve(famQueries); }
+    if (famQueries && famQueries.family && famQueries.war && famQueries.account) { return Promise.resolve(famQueries); }
     if (famQueriesLoading) { return famQueriesLoading; }
-    var urls = [], found = { family: null, war: null };
+    var urls = [], found = { family: null, war: null, account: null };
     performance.getEntriesByType("resource").forEach(function (e) { if (/\/assets\/family-[\w-]+\.js(\?|$)/.test(e.name) && urls.indexOf(e.name) < 0) { urls.push(e.name); } });
     famQueriesLoading = urls.reduce(function (p, u) {
       return p.then(function () {
@@ -992,6 +992,7 @@ function reporter() {
             var f = mod[k], src = typeof f === "function" ? String(f) : "";
             if (!found.family && /view:`home`/.test(src) && /queryKey/.test(src)) { found.family = f; }
             if (!found.war && /familyWar\(/.test(src) && /warId/.test(src)) { found.war = f; }
+            if (!found.account && /familyAccount\(/.test(src) && /familyId/.test(src)) { found.account = f; }
           });
         }, function () {});
       });
@@ -1475,7 +1476,7 @@ function reporter() {
   function checkBoosts() {
     var s = load(), p = last && last.fam.private;
     if (!p || !canPost("boost") || !canPost("boostfam")) { return; }
-    var now = Date.now(), lead = [], fam = [], changed = false, auto = autoOn(s, p);
+    var now = Date.now(), lead = [], fam = [], changed = false, auto = autoOn(s, p), reminded = false;
     s.boosts = s.boosts || {};
     Object.keys(BOOSTS).forEach(function (k) {
       var until = p[k + "BoostUntil"] ? new Date(p[k + "BoostUntil"]).getTime() : 0, pct = +p[k + "Boost"] || 0, b = s.boosts[k], name = BOOSTS[k];
@@ -1488,13 +1489,24 @@ function reporter() {
       if (until > now) {
         if (b.pct !== pct) { b.pct = pct; changed = true; }
         var again = auto[k] ? " Auto-renew is on: it will be bought again when it ends, if the game is open on that PC." : " Buy it again on the Family tab to keep it running.";
-        if (!b.h1 && until - now <= HOUR) { b.h1 = b.d24 = true; changed = true; lead.push("⏰ The **+" + pct + "% " + name + " boost** ends <t:" + t + ":R>!" + again); }
-        else if (!b.d24 && until - now <= DAY) { b.d24 = true; changed = true; lead.push("⏳ The **+" + pct + "% " + name + " boost** ends <t:" + t + ":R> (<t:" + t + ":f>)." + again); }
+        if (!b.h1 && until - now <= HOUR) { b.h1 = b.d24 = true; changed = reminded = true; lead.push("⏰ The **+" + pct + "% " + name + " boost** ends <t:" + t + ":R>!" + again); }
+        else if (!b.d24 && until - now <= DAY) { b.d24 = true; changed = reminded = true; lead.push("⏳ The **+" + pct + "% " + name + " boost** ends <t:" + t + ":R> (<t:" + t + ":f>)." + again); }
       } else if (b.until && !b.ended) { b.ended = true; changed = true; lead.push("⌛ The **+" + b.pct + "% " + name + " boost** has ended." + (auto[k] ? " Auto-renew is buying a new one." : " Buy a new one on the Family tab.")); }
     });
+    if (reminded) { var gl = renewGold(p, now); if (gl) { lead.push(gl); } }
     if (changed) { save(s); }
     if (lead.length && s.webhook) { postFor("boost", s.webhook, shout(lead.join("\n"))); }
     if (fam.length && s.lvHook) { postFor("boostfam", s.lvHook, shout(fam.join("\n"))); }
+  }
+  // Added to the "ends in a day / an hour" reminders: what renewing at +25% costs for every boost ending within a day,
+  // against the family treasury, so there's time to collect donations if gold is missing.
+  function renewGold(p, now) {
+    var price = p.boostPrices && +p.boostPrices.high, gold = +p.treasury || 0;
+    if (!price || p.treasury == null) { return ""; }
+    var n = Object.keys(BOOSTS).filter(function (k) { var u = boostEnd(p, k); return u > now && u - now <= DAY; }).length || 1, need = price * n;
+    return "💰 Renewing at +" + AUTO_PCT + "% costs " + price.toLocaleString("en-US") + " gold" + (n > 1 ? " each (" + need.toLocaleString("en-US") + " for both)" : "")
+      + "; the treasury has " + gold.toLocaleString("en-US") + "."
+      + (gold < need ? " ⚠️ **" + (need - gold).toLocaleString("en-US") + " gold missing**: time to collect donations!" : " ✅ Enough gold.");
   }
 
   // Auto-renew (s.autoBoost = {xp, cash}, switched on per PC): a boost that has run out is bought again at +25% for 7 days
@@ -1548,6 +1560,46 @@ function reporter() {
         if (rec.n >= AUTO_TRIES) { note("fail", "⚠️ Couldn't auto-renew the **" + name + " boost** after " + AUTO_TRIES + " tries. The game said: " + (e && e.message || e) + ". Buy it on the Family tab."); }
       });
     }).catch(function () {}).then(function () { autoBusy = false; redraw(); });
+  }
+
+  // ===== Donation shout-outs =====
+  // A thank-you in the family chat for every single donation of 500 gold or more, louder for bigger ones. Read every 5 minutes
+  // from the treasury ledger (the game's own query behind the Family tab's account page: {ledger: [{id, userId, userName, kind, amount}]}).
+  // s.donSeen = highest ledger entry id handled; the first look stays quiet about older donations.
+  var DON_MIN = 500, DON_EVERY = 5 * 60000, donAt = 0, donBusy = false;
+  var DON_SHOUTS = [
+    [10000, "👑💰 **{gold} GOLD** 💰👑\n{who} just made a LEGENDARY donation to the family treasury! The whole family salutes you! 🙇🏆"],
+    [2000, "💎 {who} donated **{gold} gold** to the family treasury! That's huge, thank you! 🙌🔥"],
+    [DON_MIN, "💰 {who} donated **{gold} gold** to the family treasury. Thank you! 🙏"]];
+  function checkDonations() {
+    var s = load();
+    if (!s.lvHook || !last || !client || donBusy || Date.now() - donAt < DON_EVERY || !canPost("donation")) { return; }
+    donAt = Date.now(); donBusy = true;
+    var famId = last.fam.id;
+    familyQueries().then(function (q) {
+      return q.account ? client.fetchQuery(Object.assign({}, q.account(famId), { staleTime: 60000 })) : null;
+    }).then(function (acc) {
+      var led = acc && acc.ledger;
+      if (!led || !last) { return; }
+      var s2 = load(), seen = s2.donSeen, top = seen || 0, hits = [];
+      led.forEach(function (e) {
+        var id = +e.id;
+        if (!(id > 0)) { return; } // negative ids are the game's own not-yet-confirmed entries
+        top = Math.max(top, id);
+        if (seen != null && id > seen && /donat/i.test(e.kind || "") && +e.amount >= DON_MIN && Date.now() - +new Date(e.createdAt) < DAY) { hits.push(e); }
+      });
+      if (top !== seen) { s2.donSeen = top; save(s2); } // saved before posting so a second game tab doesn't post it too
+      if (!hits.length) { return; }
+      hits.sort(function (a, b) { return a.id - b.id; });
+      var byId = {}, users = [];
+      members(last.fam).forEach(function (m) { byId[m.id] = m; });
+      var text = hits.map(function (e) {
+        var m = byId[String(e.userId)] || { id: String(e.userId), name: e.userName || "Someone" }, gold = +e.amount;
+        var tpl = DON_SHOUTS.filter(function (x) { return gold >= x[0]; })[0][1];
+        return tpl.replace("{who}", who(s2, m, users)).replace("{gold}", gold.toLocaleString("en-US"));
+      }).join("\n\n");
+      postFor("donation", s2.lvHook, shout(text, users), function () { var n = load(); n.donSeen = seen; save(n); });
+    }).catch(function () {}).then(function () { donBusy = false; });
   }
 
   // ===== War debrief =====
@@ -1823,7 +1875,7 @@ function reporter() {
         + "<div style='font-size:11.5px;color:var(--muted);margin-top:4px'>The backup holds the webhooks, Discord links and history. Keep it private: anyone with it can post in your channels.</div>"
         + hookBlock("report", "Leadership chat: daily report, weekly summary (Mondays), join / leave / inactive alerts", s.webhook, s.webhook ? "<button type='button' data-weekly" + (sending ? " disabled" : "") + ">Send weekly summary</button>" : "")
         + hookBlock("board", "Leaderboard (one message, kept up to date, with family level)", s.boardHook, "")
-        + hookBlock("level", "Family chat: level milestones, 500 / 1,000 shout-outs, 100+ streaks, family level-ups, monthly awards", s.lvHook,
+        + hookBlock("level", "Family chat: level milestones, 500 / 1,000 shout-outs, 100+ streaks, donations of 500+ gold, family level-ups, monthly awards", s.lvHook,
           (last ? "<button type='button' data-links>Link members to Discord (" + members(last.fam).filter(function (m) { return s.links && s.links[m.id]; }).length + "/" + last.fam.members.length + ")</button>" : "")
           + (s.lvHook && last ? "<button type='button' data-awards>Send awards so far</button>" : ""))
         + (showLinks && last ? linkBlock(s) : "")
@@ -2039,7 +2091,7 @@ function reporter() {
       sendNow(s[field], kind === "war"
         ? { username: "Syndicate Wars", content: "✅ War alerts connected. New wars, reminders and results will be posted in this channel." }
         : kind === "board" ? { username: "Syndicate Leaderboard", content: "✅ Leaderboard connected. It will appear in this channel and update itself." }
-        : kind === "level" ? { username: "Syndicate Activity", content: "✅ Family chat connected. Level milestones (10, 20, 30, …), +3 levels in a day and 500 / 1,000 activity days will be celebrated here." }
+        : kind === "level" ? { username: "Syndicate Activity", content: "✅ Family chat connected. Level milestones (10, 20, 30, …), +3 levels in a day, 500 / 1,000 activity days and donations of 500+ gold will be celebrated here." }
         : { username: "Syndicate Activity", content: "✅ Activity reporter connected. The daily family activity report will be posted in this channel." })
         .then(function () { alert("Test message sent. Check your Discord channel."); }, function (e) { alert("Couldn't send: " + (e && e.message || e)); });
       return;
@@ -2091,6 +2143,7 @@ function reporter() {
     checkRoster();
     checkBoosts();
     checkAutoBoost();
+    checkDonations();
     checkDebriefs();
     checkEvening();
     autoRecruits();
