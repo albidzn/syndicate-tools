@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.4.1
+// @version      2.5.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,13 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.4.1";
+  var VERSION = "2.5.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.5.0": [
+      "Leaderboard: new \"Honor rank\" column with every member's place in the game's player ranking, best first.",
+      "Leaderboard records: best honor rank ever reached (top 3), counted from now on."
+    ],
     "2.4.1": [
       "Hover tips in the panel work again (war sign-ups, activity tags, war icons and the rest). The panel now shows its own tips, because its frequent refresh kept cancelling the browser's."
     ],
@@ -125,7 +129,7 @@ function reporter() {
       return {
         id: String(m.userId != null ? m.userId : m.name), name: String(m.name || "?"), level: +m.level || 0,
         yesterday: +m.yesterday || 0, today: +m.today || 0, gold: +m.donatedGold || 0, online: !!m.online, rank: m.rank || "",
-        joinedAt: m.joinedAt ? +new Date(m.joinedAt) || 0 : 0, spec: m.spec || ""
+        joinedAt: m.joinedAt ? +new Date(m.joinedAt) || 0 : 0, spec: m.spec || "", pos: +m.position || 0 // pos = place in the game's player ranking (honor), 1 = best
       };
     });
   }
@@ -834,6 +838,11 @@ function reporter() {
     }
     var wk = Object.keys(sums).sort(function (a, b) { return sums[b] - sums[a]; })[0];
     if (wk && sums[wk] > 0) { lines.push("📅 **Last week's #1:** " + md(names[wk]) + " — " + sums[wk].toLocaleString("en-US") + " AP"); }
+    var ranks = Object.keys(r.rank || {}).map(function (id) { return r.rank[id]; }).sort(function (a, b) { return a.pos - b.pos; }).slice(0, 3);
+    if (ranks.length) {
+      lines.push("🎖️ **Best honor rank:** **" + md(ranks[0].name) + "** #" + ranks[0].pos.toLocaleString("en-US") + " (" + (ranks[0].day === today ? "today" : shortDay(Date.parse(ranks[0].day))) + ")"
+        + ranks.slice(1).map(function (b, i) { return " · " + ["🥈", "🥉"][i] + " " + md(b.name) + " #" + b.pos.toLocaleString("en-US"); }).join(""));
+    }
     var first = Object.keys(s.hist || {}).sort()[0];
     if (!lines.length) { return null; }
     return { name: "🏆 Records", value: (lines.join("\n") + (first ? "\n-# Counted since " + shortDay(Date.parse(first)) : "")).slice(0, 1024), inline: false };
@@ -866,6 +875,10 @@ function reporter() {
       var rows = list.filter(function (m) { return !skipZero || m[key] > 0; }).sort(function (a, b) { return b[key] - a[key]; });
       return rows.length ? rows.map(function (m, i) { return medal(i) + " **" + md(m.name) + "** " + m[key].toLocaleString("en-US"); }).join("\n").slice(0, 1024) : "Nothing yet.";
     }
+    function rankColumn() { // best (lowest) place in the game's ranking first
+      var rows = list.filter(function (m) { return m.pos > 0; }).sort(function (a, b) { return a.pos - b.pos; });
+      return rows.length ? rows.map(function (m, i) { return medal(i) + " **" + md(m.name) + "** #" + m.pos.toLocaleString("en-US"); }).join("\n").slice(0, 1024) : "Nothing yet.";
+    }
     return {
       username: "Syndicate Leaderboard",
       allowed_mentions: { parse: [] },
@@ -876,14 +889,27 @@ function reporter() {
         fields: [
           { name: "🔥 This week", value: column("week"), inline: true },
           { name: "⚡ Today", value: column("today"), inline: true },
+          { name: "🎖️ Honor rank", value: rankColumn(), inline: true },
           { name: "🪙 Gold donated", value: column("gold", true), inline: true }
         ].concat(recordsField(s, list) || []),
-        footer: { text: "Week = " + shortDay(ws) + " to Sunday · game days start 00:00 UTC (1 AM German time) · gold = all time\nUpdates by itself while a leader has the game open." },
+        footer: { text: "Week = " + shortDay(ws) + " to Sunday · game days start 00:00 UTC (1 AM German time) · honor rank = place in the game's player ranking · gold = all time\nUpdates by itself while a leader has the game open." },
         timestamp: new Date().toISOString()
       }]
     };
   }
+  // Each member's best place in the game's ranking ever seen: s.records.rank = {id: {name, pos, day}}.
+  function trackRanks() {
+    if (!last) { return; }
+    var s = load(), r = ensureRecords(s), day = dayKey(Date.now()), changed = false;
+    r.rank = r.rank || {};
+    members(last.fam).forEach(function (m) {
+      var b = r.rank[m.id];
+      if (m.pos > 0 && (!b || m.pos < b.pos)) { r.rank[m.id] = { name: m.name, pos: m.pos, day: day }; changed = true; }
+    });
+    if (changed) { save(s); }
+  }
   function updateBoard() {
+    trackRanks();
     var s = load();
     if (!s.boardHook || !last || boardBusy || Date.now() < boardNext) { return; }
     if (last.at < dayStart(Date.now())) { return; } // yesterday's numbers would show as today's
