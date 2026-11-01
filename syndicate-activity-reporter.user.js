@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      1.28
+// @version      1.29
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,7 +23,7 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "1.28";
+  var VERSION = "1.29";
   var KEY = "syn-activity";
   var ID = "syn-activity-panel";
   var PAGE = "/game/family";
@@ -461,12 +461,18 @@ function reporter() {
   }
   function shout(text, users) { return { username: "Syndicate Activity", allowed_mentions: { parse: [], users: users || [] }, content: text.slice(0, 2000) }; }
 
-  // Level rush: a shout-out in the family chat when someone gains 3 levels in one game day (counted like "levels today" in the panel).
+  // Level rush: a shout-out in the family chat when someone gains 3 levels in one game day, and a louder one at 5
+  // (counted like "levels today" in the panel). Only the highest new mark is posted if both were passed since the last look.
   // s.lvRush = {day, ids: {id: highest mark announced that day}}. The very first run stays quiet about gains already made.
-  var RUSH_MARKS = [3];
-  var RUSH_SHOUTS = ["⚡ {who} gained **+{n} levels** today! Leveling machine! 🚀",
-    "📈 **+{n} levels** in one day for {who}! Climbing fast! 🧗",
-    "⚡ {who} is on a level rush: **+{n} today**! Who can keep up? 🏃💨"];
+  var RUSH_MARKS = [3, 5];
+  var RUSH_SHOUTS = {
+    3: ["⚡ {who} gained **+{n} levels** today! Leveling machine! 🚀",
+      "📈 **+{n} levels** in one day for {who}! Climbing fast! 🧗",
+      "⚡ {who} is on a level rush: **+{n} today**! Who can keep up? 🏃💨"],
+    5: ["🚨💥 **LEVEL EXPLOSION** 💥🚨\n{who} just blasted through **+{n} LEVELS** today! 🚀🚀🚀 Somebody call the fire department! 🔥🧯",
+      "☄️🔥 **+{n} LEVELS IN ONE DAY!** 🔥☄️\n{who} is absolutely UNSTOPPABLE! 🦾⚡ The leaderboard is shaking! 📈💥",
+      "💥⚡ **{n} LEVELS. ONE DAY.** ⚡💥\n{who} has gone full beast mode! 🐉🔥 Bow down to the grind king! 👑🙇"]
+  };
   function checkLevelRush() {
     var s = load(), mid = dayStart(Date.now()), day = dayKey(mid), base = gainsToday(s);
     if (!s.lvHook || !last || !canPost("rush") || last.at < mid || !base) { return; }
@@ -477,13 +483,14 @@ function reporter() {
       RUSH_MARKS.forEach(function (k) { if (n >= k) { top = k; } });
       if (top <= had) { return; }
       before[m.id] = had; s.lvRush.ids[m.id] = top; changed = true;
-      if (!quiet) { hits.push({ m: m, n: n }); }
+      if (!quiet) { hits.push({ m: m, n: n, mark: top }); }
     });
     if (changed) { save(s); } // saved before posting so a second game tab doesn't post it too
     if (!hits.length) { return; }
     var users = [];
     var text = hits.map(function (h) {
-      return RUSH_SHOUTS[Math.floor(Math.random() * RUSH_SHOUTS.length)].replace("{who}", who(s, h.m, users)).replace("{n}", h.n);
+      var pool = RUSH_SHOUTS[h.mark];
+      return pool[Math.floor(Math.random() * pool.length)].replace("{who}", who(s, h.m, users)).replace("{n}", h.n);
     }).join("\n\n");
     postFor("rush", s.lvHook, shout(text, users), function () {
       var now = load();
