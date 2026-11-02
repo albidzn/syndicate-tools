@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.8.1
+// @version      2.8.2
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.8.1";
+  var VERSION = "2.8.2";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.8.2": [
+      "The docked panel now stays visible on every game page. When the window is too small to dock, or you dragged the panel away, it floats on the Family tab only."
+    ],
     "2.8.1": [
       "Panel docking: a click on the top bar no longer counts as a drag, so the panel stays docked. A panel left at the right edge by an older version docks by itself."
     ],
@@ -1340,8 +1343,21 @@ function reporter() {
   var KEEP = 3 * 60 * 1000;
   function keepFresh() {
     var s = load(), q = last && last.query;
-    if (!(s.warHook || s.boardHook || s.lvHook) || !q || q.state.fetchStatus === "fetching" || Date.now() - q.state.dataUpdatedAt < KEEP) { return; }
+    if (!(s.warHook || s.boardHook || s.lvHook || box) || !q || q.state.fetchStatus === "fetching" || Date.now() - q.state.dataUpdatedAt < KEEP) { return; }
     if (typeof q.fetch === "function" && q.options && q.options.queryFn) { q.fetch().catch(function () {}); }
+  }
+  // The docked panel can open on any game page, where the game hasn't loaded the family yet: load it through the game's own
+  // query, the same one the Family tab uses. Its family-*.js module may not be loaded there, so that comes from the game's file list.
+  var ownLoading = false, ownNext = 0;
+  function loadOwnFamily(path) {
+    if (last || path === PAGE || ownLoading || Date.now() < ownNext || !client) { return; }
+    ownLoading = true; ownNext = Date.now() + 2 * 60000;
+    var res = performance.getEntriesByType("resource").map(function (e) { return e.name; }), idx = res.filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
+    var ready = res.some(function (n) { return /\/assets\/family-[\w-]+\.js/.test(n); }) || !idx ? Promise.resolve() : fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
+      var seen = {};
+      return Promise.all((t.match(/family-[\w-]+\.js/g) || []).filter(function (n) { return !seen[n] && (seen[n] = true); }).map(function (n) { return import(idx.replace(/index-[\w-]+\.js.*$/, n)); }));
+    });
+    ready.then(familyQueries).then(function (q) { return q && q.family ? client.fetchQuery(q.family()) : null; }).catch(function () {}).then(function () { ownLoading = false; });
   }
   function nextWar() {
     if (!last) { return null; }
@@ -2522,6 +2538,7 @@ function reporter() {
     if (!box || !document.body.contains(box)) {
       box = document.createElement("div");
       box.id = ID;
+      showPlanner = showRecruits = showRanks = false; memberQuery = memberFilter = trendId = ""; // a freshly opened panel starts on Activity
       box.addEventListener("click", onClick);
       box.addEventListener("pointerdown", onDown);
       box.addEventListener("pointermove", onMove);
@@ -2792,6 +2809,7 @@ function reporter() {
     dockStyle.textContent = !w ? "" : "body > div:not(#" + ID + "):not([data-portal]):not([data-syn-tip]){width:calc(100% - " + w + "px)!important;transform:translateX(0)}"
       + ".mantine-Modal-inner{width:calc(100% - " + w + "px)!important}";
   }
+  function wouldDock() { return !pos && window.innerWidth - window.innerHeight * STAGE_VH >= DOCK_MIN; }
   function place() {
     if (!box) { setDock(0); return; }
     var W = window.innerWidth, free = W - window.innerHeight * STAGE_VH, min = box.classList.contains("min");
@@ -2997,7 +3015,7 @@ function reporter() {
   // sends the daily report, and shows the panel on the Family tab only.
   function tick() {
     var path = location.pathname.replace(/\/+$/, "");
-    if (path !== lastPath) { lastPath = path; closed = false; showPlanner = showRecruits = showRanks = false; memberQuery = memberFilter = trendId = ""; } // back on the Family tab: Activity first
+    if (path !== lastPath) { lastPath = path; if (path === PAGE) { closed = false; } } // closed stays closed until the Family tab is opened again
     var fresh = readFamily();
     // The game may drop the family data from its cache after leaving the tab; a refresh by keepFresh still lands on the query itself.
     if (!fresh && last && last.query && last.query.state.dataUpdatedAt > last.at) {
@@ -3035,7 +3053,9 @@ function reporter() {
     checkOffline();
     checkStuck();
     tabTitle();
-    if (path !== PAGE || closed) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
+    // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab.
+    if (closed || path !== PAGE && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
+    loadOwnFamily(path);
     if (drag) { return; }
     if (box && document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") { return; } // don't wipe what's being typed
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
@@ -3046,7 +3066,8 @@ function reporter() {
     lastKey = key;
     draw();
   }
-  window.addEventListener("resize", function () { place(); });
+  var resizeTimer = 0;
+  window.addEventListener("resize", function () { place(); clearTimeout(resizeTimer); resizeTimer = setTimeout(tick, 200); }); // shows or hides the panel when the room for docking changes
   setInterval(tick, 3000);
   tick();
 }
