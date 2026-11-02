@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.12.0
+// @version      2.13.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.12.0";
+  var VERSION = "2.13.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.13.0": [
+      "Duels: Where to put stat points. Tries each of your stats a bit higher in simulated fights against players of your class, and compares your base stats with theirs."
+    ],
     "2.12.0": [
       "Duels: Learn from mail reads your past duels, so the honor column uses real numbers: what a win pays, what a lost attack costs, and how the attacks on you went."
     ],
@@ -2517,15 +2520,16 @@ function reporter() {
     var q = client && client.getQueryCache().find({ queryKey: ["getMe"] }), d = q && q.state.data;
     return d && (Array.isArray(d.combat) ? d : d.user && Array.isArray(d.user.combat) ? d.user : null);
   }
-  function duelWinChance(kit, me, foe) {
-    var wins = 0, at = new Date(), seed = Math.floor(Math.random() * 2147483647);
-    for (var i = 0; i < DUEL_SIMS; i++) {
+  function duelWinChance(kit, me, foe) { return Math.round(duelWinRate(kit, me, foe, Math.floor(Math.random() * 2147483647), DUEL_SIMS) * 100); }
+  function duelWinRate(kit, me, foe, seed, sims) {
+    var wins = 0, at = new Date();
+    for (var i = 0; i < sims; i++) {
       try {
         var ev = kit.fight({ aggressors: [me], targets: [foe], rnd: new kit.Rnd(seed + i), useConsumables: true, at: at, maxTurnsPerRound: 1000 }), end = ev[ev.length - 1];
         if (end && end.winners && end.winners.indexOf(me.id) >= 0) { wins++; }
       } catch (e) {} // a fight past the game's turn limit doesn't count as a win
     }
-    return Math.round(wins / DUEL_SIMS * 100);
+    return wins / sims;
   }
   function runDuelScan() {
     if (duelState && duelState.running) { return; }
@@ -2569,7 +2573,7 @@ function reporter() {
           return (i ? wait(SCAN_GAP) : Promise.resolve()).then(function () { return client.fetchQuery(kit.opponent({ data: { id: found[i].id } })); }).then(function (foe) {
             if (!foe) { fails++; return; }
             fails = 0;
-            var row = found[i]; row.win = duelWinChance(kit, me, foe); rows.push(row);
+            var row = found[i]; row.win = duelWinChance(kit, me, foe); rows.push(row); duelFoes[row.id] = foe;
           }, function () { fails++; }).then(function () { return next(i + 1); });
         }
         return next(0).then(function () {
@@ -2703,6 +2707,82 @@ function reporter() {
       });
     }).then(function () { learnState = { note: added ? "Learned from " + added + " new fight" + (added === 1 ? "" : "s") + "." : "No new fights in the mail." }; })
       .catch(function (e) { learnState = { error: String(e && e.message || e) }; }).then(redraw);
+  }
+  // Where to put stat points: plays your fights against players of your class from the last scan, with each stat raised by the same
+  // amount in turn. The fights share their dice, so the differences come from the stat and not from luck. Base stats only: gear is in the
+  // fights, but not in the "You / Others" comparison. s.duelAdvice = {at, spec, peers, points, base, rows: [{key, mine, others, gain}]}.
+  var ADVICE_STATS = [["attack", "Attack power"], ["endurance", "Endurance"], ["luck", "Luck"], ["toughness", "Toughness"]], ADVICE_PEERS = 20, ADVICE_MIN = 5, ADVICE_SIMS = 300, ADVICE_SAME = 0.5;
+  var duelFoes = {}, adviceState = null;
+  function runDuelAdvice() {
+    if (adviceState && adviceState.running) { return; }
+    if (!client) { findClient(); }
+    var me = duelMe(), scan = load().duelScan;
+    if (!me) { adviceState = { error: "Your fighter hasn't loaded yet" }; redraw(); return; }
+    var peers = (scan ? scan.rows : []).filter(function (r) { return r.spec === me.spec; }).sort(function (a, b) { return Math.abs(a.rank - scan.myRank) - Math.abs(b.rank - scan.myRank); }).slice(0, ADVICE_PEERS);
+    if (peers.length < ADVICE_MIN) { adviceState = { error: "Only " + peers.length + " players of your class in the last scan. Scan a wider range first" }; redraw(); return; }
+    adviceState = { running: true, step: "Loading players of your class…" }; redraw();
+    duelTools().then(function (kit) {
+      var foes = [];
+      function load1(i) {
+        if (i >= peers.length) { return Promise.resolve(); }
+        var known = duelFoes[peers[i].id];
+        if (known) { foes.push(known); return load1(i + 1); }
+        adviceState = { running: true, step: "Loading " + (i + 1) + " of " + peers.length + ": " + peers[i].name, done: i, total: peers.length }; redraw();
+        return wait(SCAN_GAP).then(function () { return client.fetchQuery(kit.opponent({ data: { id: peers[i].id } })); }).then(function (f) { if (f) { duelFoes[peers[i].id] = f; foes.push(f); } }, function () {}).then(function () { return load1(i + 1); });
+      }
+      return load1(0).then(function () {
+        if (foes.length < ADVICE_MIN) { throw new Error("too few of those players could be loaded"); }
+        var avg = function (list, f) { return list.reduce(function (a, x) { return a + f(x); }, 0) / list.length; };
+        var points = Math.max(10, Math.round(avg(ADVICE_STATS, function (k) { return +me[k[0]] || 0; }) * 0.05 / 5) * 5);
+        var seeds = foes.map(function () { return Math.floor(Math.random() * 2147483647); });
+        // Runs one fighter against everyone, a player at a time, so the page keeps breathing.
+        function versus(who, label) {
+          var total = 0;
+          function step(i) {
+            if (i >= foes.length) { return Promise.resolve(total / foes.length * 100); }
+            adviceState = { running: true, step: "Simulating " + label + "…", done: i, total: foes.length }; redraw();
+            total += duelWinRate(kit, who, foes[i], seeds[i], ADVICE_SIMS);
+            return wait(0).then(function () { return step(i + 1); });
+          }
+          return step(0);
+        }
+        return versus(me, "your current stats").then(function (base) {
+          var rows = [];
+          function each(n) {
+            if (n >= ADVICE_STATS.length) { return Promise.resolve(); }
+            var k = ADVICE_STATS[n][0], plus = Object.assign({}, me); plus[k] = (+me[k] || 0) + points;
+            return versus(plus, "+" + points + " " + ADVICE_STATS[n][1]).then(function (win) {
+              rows.push({ key: k, mine: +me[k] || 0, others: Math.round(avg(foes, function (f) { return +f[k] || 0; })), gain: win - base });
+              return each(n + 1);
+            });
+          }
+          return each(0).then(function () {
+            rows.sort(function (a, b) { return b.gain - a.gain; });
+            var st = load();
+            st.duelAdvice = { at: Date.now(), spec: me.spec, peers: foes.length, points: points, base: base, rows: rows };
+            save(st);
+            adviceState = null;
+          });
+        });
+      });
+    }).catch(function (e) { adviceState = { error: String(e && e.message || e) }; }).then(redraw);
+  }
+  function adviceHtml(s) {
+    var a = s.duelAdvice, running = adviceState && adviceState.running, now = Date.now(), name = {};
+    ADVICE_STATS.forEach(function (k) { name[k[0]] = k[1]; });
+    var h = "<div class='dqhead' style='margin-top:12px'><span class='t grow'>Where to put stat points</span><button type='button' data-dueladvice" + (running ? " disabled" : "") + " title='Simulates your fights against players of your class from the last scan. Starts no fights and spends nothing.'>" + (running ? "Working…" : a ? "Check again" : "Check my stats") + "</button></div>";
+    if (running) { h += "<div class='st wait'>" + esc(adviceState.step) + "</div>" + (adviceState.total ? "<div class='bar' style='margin:6px 0'><i style='width:" + Math.round(adviceState.done / adviceState.total * 100) + "%'></i></div>" : ""); }
+    if (adviceState && adviceState.error) { h += "<div class='st bad'>Couldn't check: " + esc(adviceState.error) + ".</div>"; }
+    if (!a) { return running || adviceState ? h : h + "<div class='mqnote'>Compares your stats with players of your class from the last scan, and tries each stat a bit higher to see which wins you the most fights.</div>"; }
+    var best = a.rows[0], close = a.rows.length > 1 && best.gain - a.rows[1].gain < ADVICE_SAME, age = Math.max(0, Math.round((now - a.at) / 60000));
+    h += "<div class='dqfacts'>" + (best.gain < ADVICE_SAME ? "No stat stands out: <b>+" + a.points + "</b> anywhere barely changes your wins against these players."
+      : "Best next: <b>" + name[best.key] + "</b>" + (close ? " or <b>" + name[a.rows[1].key] + "</b>" : "") + ". <b>+" + a.points + "</b> adds about <b>" + best.gain.toFixed(1) + "</b> points to your win chance.") + "</div>";
+    h += "<table class='dq'><thead><tr><th style='text-align:left'>Stat</th><th>You</th><th title='Average base stat of those players, without gear'>Others</th><th title='Change in your average win chance with +" + a.points + " in this stat'>+" + a.points + "</th></tr></thead><tbody>";
+    a.rows.forEach(function (r) {
+      var behind = r.mine < r.others;
+      h += "<tr><td style='text-align:left;color:var(--fg);white-space:nowrap'>" + name[r.key] + "</td><td" + (behind ? " style='color:#e8c46a'" : "") + ">" + r.mine.toLocaleString("en-US") + "</td><td>" + r.others.toLocaleString("en-US") + "</td><td class='w " + (r.gain >= ADVICE_SAME ? "hi" : "") + "'>" + (r.gain >= 0 ? "+" : "") + r.gain.toFixed(1) + "</td></tr>";
+    });
+    return h + "</tbody></table><div class='mqnote'>Against " + a.peers + " " + esc(SPECS[a.spec] || "") + " players near your rank, " + ADVICE_SIMS + " fights each, your average win chance is " + a.base.toFixed(0) + "%. Checked " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - a.at) + " ago") + ". This compares equal points: it doesn't know what each upgrade costs. Other players of your class only, so it won't show how you do against the other classes.</div>";
   }
   function learnHtml(s) {
     var running = learnState && learnState.running, wins = honorWins(s), lost = honorLosses(s), dd = s.duelDefended, h = "<div class='dqhead' style='margin-top:12px'><span class='t grow'>Learned so far</span><button type='button' data-duellearn" + (running ? " disabled" : "") + " title='Reads the newest pages of your duel mail, one fight at a time. Starts no fights.'>" + (running ? "Reading…" : "Learn from mail") + "</button></div><div class='dqfacts'>";
@@ -2894,7 +2974,7 @@ function reporter() {
       h += "</tbody></table>";
     }
     var age = Math.max(0, Math.round((now - scan.at) / 60000));
-    return h + learnHtml(s) + "<div class='mqnote'>Scanned " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + (scan.partial ? ", some players couldn't be loaded" : "") + ". Win % is " + DUEL_SIMS + " simulated fights with the game's own formula, using your consumables. A real fight can still go either way.</div>";
+    return h + adviceHtml(s) + learnHtml(s) + "<div class='mqnote'>Scanned " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + (scan.partial ? ", some players couldn't be loaded" : "") + ". Win % is " + DUEL_SIMS + " simulated fights with the game's own formula, using your consumables. A real fight can still go either way.</div>";
   }
 
   // Away (vacation): s.away = {id: start of the last away game day}. Set per PC from the 🏖️ button; expired entries are ignored.
@@ -3488,6 +3568,7 @@ function reporter() {
     if (t.hasAttribute("data-duelsort")) { duelSort = t.getAttribute("data-duelsort"); redraw(); return; }
     if (t.hasAttribute("data-gangscan")) { runGangScan(); return; }
     if (t.hasAttribute("data-duellearn")) { runDuelLearn(); return; }
+    if (t.hasAttribute("data-dueladvice")) { runDuelAdvice(); return; }
     if (t.hasAttribute("data-away")) { setAway(t.getAttribute("data-away")); return; }
     if (t.hasAttribute("data-remind")) { sendRemind(); return; }
     if (t.hasAttribute("data-sort")) { s.sort = t.getAttribute("data-sort"); save(s); redraw(); return; }
@@ -3664,7 +3745,7 @@ function reporter() {
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
