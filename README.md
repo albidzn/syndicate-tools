@@ -5,7 +5,7 @@ Tools for The Syndicate family in [Mafia Reborn](https://mafiareborn.com).
 | File | What it is |
 | --- | --- |
 | `syndicate-activity-reporter.user.js` | Tampermonkey script for leaders: the leader panel on the Family tab, Discord reports, leaderboard, war alerts, recruits and invites, boost reminders and auto-renew. |
-| `syndicate-mission-picker.html` | The Mission Reader bookmarklet for every member. Open the file and drag the button to the bookmarks bar. |
+| `syndicate-mission-picker.html` | The Mission Reader bookmarklet, for members without the reporter script (the reporter has the same picker in its Personal tab). Open the file and drag the button to the bookmarks bar. |
 | `screenshots/` | Pictures for the Discord posts. |
 
 ## Installing the reporter

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.8.4
+// @version      2.9.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,13 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.8.4";
+  var VERSION = "2.9.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.9.0": [
+      "Panel: new Personal and Family tabs at the top. Personal has the mission picker, so it no longer floats over the game. It opens by itself on the Godfather bar, and Family opens on the Family tab.",
+      "The Today / Yesterday / Levels buttons moved next to the member search. The Mission Reader bookmark's own panel stays hidden while this panel is open."
+    ],
     "2.8.4": [
       "Docked panel: the Mission Reader keeps its normal size and sits next to the panel instead of stretching across the screen."
     ],
@@ -995,6 +999,8 @@ function reporter() {
 
   var last = null, sending = false, retryAt = 0, error = "", note = "", closed = false, showSetup = false, showLinks = false, showPlanner = false, showRecruits = false, showRanks = false, showVol = false;
   var box = null, lastKey = "", lastPath = location.pathname;
+  // Personal (missions) or Family. Arriving on the Godfather bar opens Personal, arriving on the Family tab opens Family.
+  var BAR = "/game/godfather", area = location.pathname.replace(/\/+$/, "") === BAR ? "personal" : "family";
 
   function send(manual) {
     var mid = dayStart(Date.now()), day = dayKey(mid - 1), s = load();
@@ -2291,7 +2297,7 @@ function reporter() {
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
     + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
     + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID table.mem td.tg{position:relative}#ID button.awaybtn{position:absolute;left:-16px;top:50%;transform:translateY(-50%);border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
-    + "#ID input.msearch{margin:8px 0 2px;font-family:inherit}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
+    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
@@ -2363,6 +2369,80 @@ function reporter() {
     }
     return h ? "<span class='tags'>" + h + "</span>" : "";
   }
+  // ===== Personal: mission picker =====
+  // The same picker as the Mission Reader bookmark: reads the Godfather bar's missions from the game's data ("getAvailableQuests"),
+  // scores each by XP and cash per energy for the chosen goal. The goal is shared with the bookmark (localStorage "mr-reader").
+  // The list stays in memory after leaving the bar, marked as from the last visit.
+  var MQ_NAMES = { old_man: "Old Man", cookie: "Cookie", agatha: "Agatha", sean: "Sean", vincenzo: "Vincenzo", velvet: "Velvet Kiss", dwayne: "Dwayne", jose: "José", isabel: "Isabel", carlos: "Carlos", little_joe: "Little Joe", madam_chow: "Mihn", mei: "Amaya", wing: "Akuma", ah_keung: "Mr. Woo", suki: "Katara" };
+  var MQ_MODES = { xp: { w: 1, label: "XP", title: "Best for XP" }, balanced: { w: 0.5, label: "Balanced", title: "Best balanced" }, cash: { w: 0, label: "Cash", title: "Best for cash" } };
+  var MQ_TIERS = { cash: ["Item", "", false], gold1: ["Gold", "#c9961a", false], gold2: ["Gold II", "#c9961a", false], gold3: ["Gold III", "#c9961a", false], epic1: ["Epic", "#e0524f", true], epic2: ["Epic II", "#e0524f", true], legendary: ["Legendary", "#9b5fd0", true], unique: ["Unique", "#2fa3d6", true] };
+  var missions = [], mqItems = null, mqItemsLoading = false;
+  function mqNice(g) { return MQ_NAMES[g] || String(g || "Mission").split("_").map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(" "); }
+  function mqIsQuest(q) { return !!q && typeof q === "object" && typeof q.energy === "number" && (typeof q.xp === "number" || typeof q.cash === "number"); }
+  function mqPick(d, depth) {
+    if (Array.isArray(d)) { return d.filter(mqIsQuest); }
+    if (d && typeof d === "object" && depth < 3) { for (var k in d) { var r = mqPick(d[k], depth + 1); if (r.length) { return r; } } }
+    return [];
+  }
+  function readMissions() {
+    var q = client && client.getQueryCache().find({ queryKey: ["getAvailableQuests"] }), got = q ? mqPick(q.state.data, 0) : [];
+    if (!got.length) { return; }
+    missions = got.map(function (m) {
+      return { name: mqNice(m.giver), energy: m.energy, xp: m.xp || 0, cash: m.cash || 0, item: m.item && m.item.id ? { id: String(m.item.id), tier: m.item.tier || "" } : null };
+    }).filter(function (m) { return m.energy > 0; });
+    if (missions.some(function (m) { return m.item; })) { loadMqItems(); }
+  }
+  // Item names and pictures come from the game's own item table, in its ItemImg script file.
+  function loadMqItems() {
+    if (mqItems || mqItemsLoading) { return; }
+    var url = performance.getEntriesByType("resource").map(function (e) { return e.name; }).filter(function (n) { return /\/assets\/ItemImg-[\w-]+\.js/.test(n); })[0];
+    if (!url) { return; }
+    mqItemsLoading = true;
+    fetch(url).then(function (r) { return r.text(); }).then(function (t) {
+      var map = {}, m, re = /\{id:`([^`]+)`([^{}]*?)\}/g;
+      while ((m = re.exec(t))) {
+        var name = (m[2].match(/name:`([^`]+)`/) || [])[1], img = (m[2].match(/img:`([^`]+)`/) || [])[1];
+        if (name || img) { map[m[1]] = { name: name, img: img }; }
+      }
+      mqItems = map; redraw();
+    }, function () { mqItems = {}; });
+  }
+  function mqItemInfo(it) {
+    var def = mqItems && mqItems[it.id] || {}, tier = MQ_TIERS[it.tier] || [it.tier ? mqNice(it.tier) : "Item", "", false];
+    return { name: def.name || mqNice(it.id), img: def.img || "", label: tier[0], color: tier[1] || "var(--muted)", rare: tier[2] };
+  }
+  function mqMode() { try { var m = JSON.parse(localStorage.getItem("mr-reader") || "{}").mode; return MQ_MODES[m] ? m : "balanced"; } catch (e) { return "balanced"; } }
+  function setMqMode(mode) { try { var o = JSON.parse(localStorage.getItem("mr-reader") || "{}"); o.mode = mode; localStorage.setItem("mr-reader", JSON.stringify(o)); } catch (e) {} }
+  function mqRank(mode) {
+    var w = MQ_MODES[mode].w, maxX = 0, maxC = 0, r = { bx: null, bc: null, bs: null };
+    missions.forEach(function (m) { m.xpr = m.xp / m.energy; m.cr = m.cash / m.energy; maxX = Math.max(maxX, m.xpr); maxC = Math.max(maxC, m.cr); });
+    missions.forEach(function (m) {
+      m.score = (w * (maxX ? m.xpr / maxX : 0) + (1 - w) * (maxC ? m.cr / maxC : 0)) * 100;
+      if (!r.bx || m.xpr > r.bx.xpr) { r.bx = m; }
+      if (!r.bc || m.cr > r.bc.cr) { r.bc = m; }
+      if (!r.bs || m.score > r.bs.score) { r.bs = m; }
+    });
+    return r;
+  }
+  function mqBadge(it) { return "<span class='ib" + (it.rare ? " rare" : "") + "' style='--c:" + it.color + "'>" + esc(it.label) + "</span>"; }
+  function missionHtml() {
+    var onBar = lastPath === BAR, mode = mqMode(), fmt = function (v) { return v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }); };
+    var link = "<a class='golink' href='" + BAR + "'>Open the Godfather bar</a>";
+    if (!missions.length) { return "<div class='mqnote' style='font-size:13px;margin-top:12px'>" + (onBar ? "Waiting for the missions to load…" : link + " to see the best mission.") + "</div>"; }
+    var r = mqRank(mode), h = "<div class='mqhead'><span class='t grow'>" + MQ_MODES[mode].title + "</span><span class='seg'>" + Object.keys(MQ_MODES).map(function (k) {
+      return "<button type='button' data-mqmode='" + k + "'" + (k === mode ? " class='on'" : "") + ">" + MQ_MODES[k].label + "</button>";
+    }).join("") + "</span></div><div class='pick'>" + esc(r.bs.name) + "</div>"
+      + "<div class='lead'>Most XP per energy: <b class='x'>" + esc(r.bx.name) + "</b> · Most cash per energy: <b class='c'>" + esc(r.bc.name) + "</b></div>"
+      + "<table class='mq'><thead><tr><th>Mission</th><th>Energy</th><th>XP/E</th><th>Cash/E</th><th>Score</th></tr></thead><tbody>";
+    missions.forEach(function (m) {
+      var it = m.item ? mqItemInfo(m.item) : null;
+      h += "<tr class='" + (m === r.bs ? "best" : "") + (it && it.rare ? " rare" : "") + "'" + (it ? " style='--c:" + it.color + "'" : "") + "><td><span class='nm'>" + esc(m.name) + "</span>"
+        + (it ? mqBadge(it) + "<div class='mqitem'>" + (it.img ? "<img src='" + esc(it.img) + "' alt=''>" : "") + "<span>" + esc(it.name) + "</span></div>" : "")
+        + "</td><td>" + m.energy + "</td><td class='" + (m === r.bx ? "x" : "") + "'>" + fmt(m.xpr) + "</td><td class='" + (m === r.bc ? "c" : "") + "'>" + fmt(m.cr) + "</td><td class='sc'>" + Math.round(m.score) + "</td></tr>";
+    });
+    return h + "</tbody></table>" + (onBar ? "" : "<div class='mqnote'>From your last visit. " + link + " for the current missions.</div>");
+  }
+
   // Away (vacation): s.away = {id: start of the last away game day}. Set per PC from the 🏖️ button; expired entries are ignored.
   function awayUntil(s, id) { var u = s.away && s.away[id]; return u && u >= dayStart(Date.now()) ? u : 0; }
   function setAway(id) {
@@ -2492,6 +2572,7 @@ function reporter() {
   function minChips(s, list, full) {
     if (!last) { return "<span class='mc'>Loading…</span>"; }
     var h = "<span class='mc' title='Members at 100 points today'><b>" + full + "/" + list.length + "</b></span>", nw = nextWar();
+    if (lastPath === BAR && missions.length) { var mode = mqMode(); h = "<span class='mc' title='" + MQ_MODES[mode].title + "'>🎯 <b>" + esc(mqRank(mode).bs.name) + "</b></span>" + h; }
     if (nw) {
       var side = warSignups(last.fam)[nw.side.attack ? "attack" : "defense"], n = list.filter(function (m) { return side && side.ids[m.id]; }).length;
       h += "<span class='mc' title='" + (nw.side.attack ? "Our attack on " : "Defence against ") + esc(nw.side.foe) + ": " + n + " of " + list.length + " registered'><i>" + (nw.side.attack ? ATK_ICON : DEF_ICON) + "</i><b>" + leftText(startOf(nw.w) - Date.now()) + "</b> " + n + "/" + list.length + "</span>";
@@ -2591,15 +2672,21 @@ function reporter() {
       return;
     }
     var view = last && showRecruits ? "recruits" : last && showPlanner ? "planner" : last && showRanks ? "ranks" : "activity";
-    if (view !== "activity") { box.className += " wide"; }
-    html += "<div class='top' title='" + DRAG_TIP + "'><span class='t grow'>" + ({ recruits: "Recruits", planner: "War planner", ranks: "Rank suggestions", activity: "Activity" }[view]) + "</span>"
-      + (view !== "activity" ? "" : "<span class='seg'>" + Object.keys(SORTS).map(function (k) { return "<button type='button' data-sort='" + k + "' class='" + (k === sortBy ? "on" : "") + "'>" + SORTS[k] + "</button>"; }).join("") + "</span>")
+    if (view !== "activity" && area !== "personal") { box.className += " wide"; }
+    html += "<div class='top' title='" + DRAG_TIP + "'><span class='seg area'>" + [["personal", "👤 Personal"], ["family", "👨‍👩‍👦 Family"]].map(function (o) {
+      return "<button type='button' data-area='" + o[0] + "'" + (area === o[0] ? " class='on'" : "") + ">" + o[1] + "</button>";
+    }).join("") + "</span><span class='grow'></span>"
       + "<button type='button' class='icon vol' data-vol title='Game sound volume (this PC)'>" + (volume === 0 ? "🔇" : volume < 50 ? "🔉" : "🔊") + " " + volume + "%</button>"
       + "<button type='button' class='icon' data-min title='Minimize'>&ndash;</button>" + close + "</div>";
     if (showVol) {
       // While the slider has focus the panel doesn't redraw (see tick), so dragging isn't interrupted.
       html += "<div class='volrow'><span>Game sound</span><input type='range' min='0' max='100' step='1' value='" + volume + "' data-volslider>"
         + "<b class='vv'>" + (volume ? volume + "%" : "Off") + "</b></div>";
+    }
+    if (area === "personal") {
+      box.innerHTML = html + missionHtml() + "<div class='ver'>Activity v" + VERSION + "</div>";
+      place(); tipTitles();
+      return;
     }
     // The views as tabs right under the title, so switching never needs scrolling.
     if (last) {
@@ -2628,7 +2715,8 @@ function reporter() {
         + "<div class='stat' title='" + esc(warTip) + "'><b class='wk'><i>" + ATK_ICON + "</i>" + (nA == null ? "–" : nA) + " <i>" + DEF_ICON + "</i>" + (nD == null ? "–" : nD) + "</b><span>war sign-ups</span></div>"
         + "<div class='stat'><b>" + untilReset() + "</b><span>until reset</span></div></div>";
       html += boostHtml(s) + remindHtml(s, list, su);
-      html += "<input type='search' class='msearch' data-msearch placeholder='Search members…' value='" + esc(memberQuery) + "' autocomplete='off'>";
+      html += "<div class='msrow'><input type='search' class='msearch' data-msearch placeholder='Search members…' value='" + esc(memberQuery) + "' autocomplete='off'><span class='seg'>"
+        + Object.keys(SORTS).map(function (k) { return "<button type='button' data-sort='" + k + "' class='" + (k === sortBy ? "on" : "") + "'>" + SORTS[k] + "</button>"; }).join("") + "</span></div>";
       var flags = {};
       list.forEach(function (m) { flags[m.id] = memberFlags(s, m, su); });
       html += filterHtml(list, flags, su);
@@ -2826,7 +2914,7 @@ function reporter() {
   // The transform makes the game's own fixed elements (and its toasts) follow its narrower root. Too little room: the panel floats.
   var STAGE_VH = 1.328, DOCK_MIN = 380, DOCK_MAX = 520, COMPACT = 420, MIN_BAR = 190, dockStyle = null, dockNow = 0;
   // Only the game's own root is narrowed, marked here: other things added to the page (the Mission Reader, extensions) keep their
-  // size. It's the tallest top-level block without an id. The Mission Reader, unless dragged somewhere, moves left of the panel.
+  // size. It's the tallest top-level block without an id.
   function markGameRoot() {
     var cur = document.querySelector("body > [data-syn-root]");
     if (cur) { return; }
@@ -2834,14 +2922,18 @@ function reporter() {
     all.sort(function (a, b) { return b.offsetHeight - a.offsetHeight; });
     if (all[0]) { all[0].setAttribute("data-syn-root", ""); }
   }
+  var readerStyle = null;
   function setDock(w) {
     if (w) { markGameRoot(); }
+    // The Mission Reader bookmark's own panel would only cover the game: Personal shows the same thing while this panel is open.
+    if (!readerStyle) { readerStyle = document.createElement("style"); document.head.appendChild(readerStyle); }
+    var hide = box ? "#mr-reader-panel{display:none!important}" : "";
+    if (readerStyle.textContent !== hide) { readerStyle.textContent = hide; }
     if (w === dockNow) { return; }
     dockNow = w;
     if (!dockStyle) { dockStyle = document.createElement("style"); document.head.appendChild(dockStyle); }
     dockStyle.textContent = !w ? "" : "body > [data-syn-root]{width:calc(100% - " + w + "px)!important;transform:translateX(0)}"
-      + ".mantine-Modal-inner{width:calc(100% - " + w + "px)!important}"
-      + "#mr-reader-panel:not([style*='left']){right:" + (w + 12) + "px!important}";
+      + ".mantine-Modal-inner{width:calc(100% - " + w + "px)!important}";
   }
   function wouldDock() { return !pos && window.innerWidth - window.innerHeight * STAGE_VH >= DOCK_MIN; }
   function place() {
@@ -2929,6 +3021,8 @@ function reporter() {
     if (t.hasAttribute("data-buyboost")) { buyBoost(t.getAttribute("data-buyboost")); return; }
     if (t.hasAttribute("data-min")) { s.min = !s.min; save(s); redraw(); return; }
     if (t.hasAttribute("data-vol")) { showVol = !showVol; redraw(); return; }
+    if (t.hasAttribute("data-area")) { area = t.getAttribute("data-area"); redraw(); return; }
+    if (t.hasAttribute("data-mqmode")) { setMqMode(t.getAttribute("data-mqmode")); redraw(); return; }
     if (t.hasAttribute("data-away")) { setAway(t.getAttribute("data-away")); return; }
     if (t.hasAttribute("data-remind")) { sendRemind(); return; }
     if (t.hasAttribute("data-sort")) { s.sort = t.getAttribute("data-sort"); save(s); redraw(); return; }
@@ -3049,7 +3143,10 @@ function reporter() {
   // sends the daily report, and shows the panel on the Family tab only.
   function tick() {
     var path = location.pathname.replace(/\/+$/, "");
-    if (path !== lastPath) { lastPath = path; if (path === PAGE) { closed = false; } } // closed stays closed until the Family tab is opened again
+    if (path !== lastPath) { // closed stays closed until the Family tab or the bar is opened again
+      lastPath = path;
+      if (path === PAGE || path === BAR) { closed = false; area = path === BAR ? "personal" : "family"; }
+    }
     var fresh = readFamily();
     // The game may drop the family data from its cache after leaving the tab; a refresh by keepFresh still lands on the query itself.
     if (!fresh && last && last.query && last.query.state.dataUpdatedAt > last.at) {
@@ -3087,15 +3184,16 @@ function reporter() {
     checkOffline();
     checkStuck();
     tabTitle();
-    // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab.
-    if (closed || path !== PAGE && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
+    readMissions();
+    // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab and the bar.
+    if (closed || path !== PAGE && path !== BAR && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
     loadOwnFamily(path);
     if (drag) { return; }
     if (box && document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") { return; } // don't wipe what's being typed
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
