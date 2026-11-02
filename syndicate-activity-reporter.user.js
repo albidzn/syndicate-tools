@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.8.3
+// @version      2.8.4
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.8.3";
+  var VERSION = "2.8.4";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.8.4": [
+      "Docked panel: the Mission Reader keeps its normal size and sits next to the panel instead of stretching across the screen."
+    ],
     "2.8.3": [
       "Boost box: shows the cost for both boosts next to the single price, and how long the treasury keeps both boosts running at today's price. Hover for the details."
     ],
@@ -2822,12 +2825,23 @@ function reporter() {
   // panel, it fills the right edge at full height and the game's root gets narrower, so the game re-centres beside it.
   // The transform makes the game's own fixed elements (and its toasts) follow its narrower root. Too little room: the panel floats.
   var STAGE_VH = 1.328, DOCK_MIN = 380, DOCK_MAX = 520, COMPACT = 420, MIN_BAR = 190, dockStyle = null, dockNow = 0;
+  // Only the game's own root is narrowed, marked here: other things added to the page (the Mission Reader, extensions) keep their
+  // size. It's the tallest top-level block without an id. The Mission Reader, unless dragged somewhere, moves left of the panel.
+  function markGameRoot() {
+    var cur = document.querySelector("body > [data-syn-root]");
+    if (cur) { return; }
+    var all = [].slice.call(document.querySelectorAll("body > div:not([id]):not([data-portal]):not([data-syn-tip])"));
+    all.sort(function (a, b) { return b.offsetHeight - a.offsetHeight; });
+    if (all[0]) { all[0].setAttribute("data-syn-root", ""); }
+  }
   function setDock(w) {
+    if (w) { markGameRoot(); }
     if (w === dockNow) { return; }
     dockNow = w;
     if (!dockStyle) { dockStyle = document.createElement("style"); document.head.appendChild(dockStyle); }
-    dockStyle.textContent = !w ? "" : "body > div:not(#" + ID + "):not([data-portal]):not([data-syn-tip]){width:calc(100% - " + w + "px)!important;transform:translateX(0)}"
-      + ".mantine-Modal-inner{width:calc(100% - " + w + "px)!important}";
+    dockStyle.textContent = !w ? "" : "body > [data-syn-root]{width:calc(100% - " + w + "px)!important;transform:translateX(0)}"
+      + ".mantine-Modal-inner{width:calc(100% - " + w + "px)!important}"
+      + "#mr-reader-panel:not([style*='left']){right:" + (w + 12) + "px!important}";
   }
   function wouldDock() { return !pos && window.innerWidth - window.innerHeight * STAGE_VH >= DOCK_MIN; }
   function place() {
