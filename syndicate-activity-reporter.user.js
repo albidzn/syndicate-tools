@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.11.0
+// @version      2.12.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.11.0";
+  var VERSION = "2.12.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.12.0": [
+      "Duels: Learn from mail reads your past duels, so the honor column uses real numbers: what a win pays, what a lost attack costs, and how the attacks on you went."
+    ],
     "2.11.0": [
       "Personal tab: new Timers section with your gang members, mission booster and food running out, and shop, wanted, gang war and survival timers per city.",
       "Personal tab: new Gang war section rates the next opponent in each unlocked district with simulated fights, best chance first.",
@@ -2496,14 +2499,14 @@ function reporter() {
       var file = function (name) { var m = t.match(new RegExp(name + "-[\\w-]+\\.js")); if (!m) { throw new Error("the game's " + name + " file wasn't found (the game may have changed)"); } return dir + m[0]; };
       return Promise.all([import(file("computeFight")), import(file("Random")), import(file("duels"))]);
     }).then(function (got) {
-      var kit = { fight: null, Rnd: null, opponent: null };
+      var kit = { fight: null, Rnd: null, opponent: null, duel: null };
       Object.keys(got[0]).forEach(function (k) { var f = got[0][k]; if (typeof f === "function" && /aggressors/.test(String(f)) && /targets/.test(String(f)) && /fight_result/.test(String(f))) { kit.fight = f; } });
       Object.keys(got[1]).forEach(function (k) { var f = got[1][k]; if (typeof f === "function" && f.prototype && f.prototype.prob) { kit.Rnd = f; } });
       // Building a query's options sends nothing, so the opponent query can be told apart by its key.
       Object.keys(got[2]).forEach(function (k) {
         var f = got[2][k];
         if (typeof f !== "function") { return; }
-        try { var o = f({ data: { id: 1 } }); if (o && o.queryKey && /opponent/i.test(JSON.stringify(o.queryKey))) { kit.opponent = f; } } catch (e) {}
+        try { var o = f({ data: { id: 1 } }); if (o && o.queryKey && /opponent/i.test(JSON.stringify(o.queryKey))) { kit.opponent = f; } else if (o && o.queryKey && o.queryKey[0] === "getDuelFn") { kit.duel = f; } } catch (e) {}
       });
       if (!kit.fight || !kit.Rnd || !kit.opponent) { throw new Error("the game's duel code wasn't recognised (the game may have changed)"); }
       duelKit = kit;
@@ -2579,10 +2582,26 @@ function reporter() {
       });
     }).catch(function (e) { duelState = { error: String(e && e.message || e) }; }).then(redraw);
   }
-  // Honor for a win isn't in the game's files, the server decides it, so it's learned from your own won duels (the game keeps each
-  // fight's result in its data, key "getDuelFn"). Model: honor = c × (their honor ÷ yours), c = the median of what the fights so far paid.
-  // Until there are a few fights, c is a guess from the usual size of a win. s.duelLog = [{id, gain, ratio, at}], newest 100.
-  var HONOR_GUESS = 50, HONOR_MIN = 3, HONOR_KEEP = 100, duelSeen = {}, duelSort = "rank";
+  // Honor isn't in the game's files, the server decides it, so it's learned from real fights: your own attacks as they happen, and
+  // every attack on you from the mail. Each fight record has both players and both rewards, so what an attacker won or lost counts
+  // whoever the attacker was. Model, with ratio = defender's honor ÷ attacker's:
+  // a win pays c × ratio, a lost attack costs l ÷ ratio, c and l being the medians so far. Until there are a few fights, c is a guess.
+  // s.duelLog = [{id, gain, ratio, won, at}], newest 300 (entries from before 2.12 have no "won" and are wins).
+  // s.duelDefended = {won, lost, honor}: attacks on you and your honor change from them, counted once per fight.
+  var HONOR_GUESS = 50, HONOR_MIN = 3, HONOR_KEEP = 300, MAIL_PAGES = 5, duelSeen = {}, duelSort = "rank", learnState = null;
+  function duelSeenInLog(s, id) { return (s.duelSeenIds || []).indexOf(id) >= 0 || (s.duelLog || []).some(function (l) { return l.id === id; }); }
+  // Adds one fight record to s (the caller saves). honors: where honor comes from when the record itself doesn't carry it.
+  function learnFight(s, d, attackerHonor, defenderHonor, meId) {
+    var c = d.characters, a = d.rewards.attacker || {}, gain = +a.honor || 0;
+    s.duelSeenIds = (s.duelSeenIds || []).concat([d.id]).slice(-1000);
+    if (c.defender.id === meId) {
+      var dd = s.duelDefended = s.duelDefended || { won: 0, lost: 0, honor: 0 };
+      if (d.won) { dd.lost++; } else { dd.won++; }
+      dd.honor += +(d.rewards.defender || {}).honor || 0;
+    }
+    if (!attackerHonor || !defenderHonor || d.won && gain <= 0) { return; }
+    s.duelLog = (s.duelLog || []).concat([{ id: d.id, gain: gain, ratio: defenderHonor / attackerHonor, won: !!d.won, at: Date.now() }]).slice(-HONOR_KEEP);
+  }
   function learnDuels() {
     var me = client && duelMe();
     if (!me) { return; }
@@ -2590,22 +2609,113 @@ function reporter() {
       var d = q.state && q.state.data, c = d && d.characters;
       if (!d || duelSeen[d.id] || !c || !c.attacker || !c.defender || !d.rewards || !d.rewards.attacker) { return; }
       duelSeen[d.id] = true;
-      if (c.attacker.id !== me.id || !d.won || !(+d.rewards.attacker.honor > 0)) { return; }
+      if (c.attacker.id !== me.id || learnState && learnState.running) { return; } // attacks on you come in through the mail scan, with their honor looked up
       var s = load(), scan = s.duelScan, row = scan && scan.rows.filter(function (r) { return r.id === c.defender.id; })[0];
-      var theirs = +c.defender.honor || row && row.honor || 0, mine = +c.attacker.honor || +me.honor || scan && scan.myHonor || 0;
-      if (!theirs || !mine || (s.duelLog || []).some(function (l) { return l.id === d.id; })) { return; }
-      s.duelLog = (s.duelLog || []).concat([{ id: d.id, gain: +d.rewards.attacker.honor, ratio: theirs / mine, at: Date.now() }]).slice(-HONOR_KEEP);
+      if (duelSeenInLog(s, d.id)) { return; }
+      learnFight(s, d, +c.attacker.honor || +me.honor || scan && scan.myHonor || 0, +c.defender.honor || row && row.honor || 0, me.id);
       save(s);
     });
   }
   function honorEstimate(s, row, myHonor) {
     if (!row.honor || !myHonor) { return 0; }
-    var log = s.duelLog || [], c = HONOR_GUESS;
-    if (log.length >= HONOR_MIN) {
-      var per = log.map(function (l) { return l.gain / l.ratio; }).sort(function (a, b) { return a - b; });
-      c = per[Math.floor(per.length / 2)];
+    var wins = honorWins(s), c = wins.length >= HONOR_MIN ? median(wins.map(function (l) { return l.gain / l.ratio; })) : HONOR_GUESS;
+    return Math.max(1, Math.round(c * honorRatio(row, myHonor)));
+  }
+  // What a lost attack costs against this player, or 0 until there's enough to say.
+  function honorLoss(s, row, myHonor) {
+    if (!row.honor || !myHonor) { return 0; }
+    var lost = honorLosses(s);
+    return lost.length >= HONOR_MIN ? Math.round(median(lost.map(function (l) { return -l.gain * l.ratio; })) / honorRatio(row, myHonor)) : 0;
+  }
+  function honorRatio(row, myHonor) { return Math.max(0.25, Math.min(4, row.honor / myHonor)); }
+  function honorWins(s) { return (s.duelLog || []).filter(function (l) { return l.won !== false; }); }
+  function honorLosses(s) { return (s.duelLog || []).filter(function (l) { return l.won === false && l.gain < 0; }); }
+  function median(list) { var a = list.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; }
+
+  // The mail's duel tab (attacks on you) isn't exported by the game, so its request is rebuilt like the player ranking's.
+  var mailFn = null;
+  function mailboxFn() {
+    if (mailFn) { return Promise.resolve(mailFn); }
+    var res = performance.getEntriesByType("resource").map(function (e) { return e.name; });
+    var csf = res.filter(function (n) { return /\/assets\/createServerFn-[\w-]+\.js/.test(n); })[0], idx = res.filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
+    if (!csf || !idx) { return Promise.reject(new Error("the game's files weren't found, reload the game and try again")); }
+    return Promise.all([import(csf), fetch(idx).then(function (r) { return r.text(); })]).then(function (got) {
+      var mod = got[0], file = (got[1].match(/mail-[\w-]+\.js/) || [])[0];
+      if (!file) { throw new Error("the mail page wasn't found in the game's files"); }
+      return fetch(idx.replace(/index-[\w-]+\.js.*$/, file)).then(function (r) { return r.text(); }).then(function (t) {
+        var id = (t.match(/handler\(\w+\(`([0-9a-f]{64})`\)\),\w+=\(\w+,\w+\)=>\w+\(\{queryKey:\w+\.mailbox/) || [])[1], rpc = null, make = null;
+        Object.keys(mod).forEach(function (k) {
+          var f = mod[k], src = typeof f === "function" ? String(f) : "";
+          if (src.indexOf("/_serverFn/") >= 0) { rpc = f; } else if (src.indexOf("inputValidator") >= 0) { make = f; }
+        });
+        if (!id || !rpc || !make) { throw new Error("the mail request wasn't found (the game may have changed)"); }
+        mailFn = make({ method: "POST" }).handler(rpc(id));
+        return mailFn;
+      });
+    });
+  }
+  // Goes through the newest pages of the duel mail and learns from each fight it hasn't seen. Only reads, like clicking "view" on each.
+  function runDuelLearn() {
+    if (learnState && learnState.running) { return; }
+    if (!client) { findClient(); }
+    var me = duelMe();
+    if (!me) { learnState = { error: "Your fighter hasn't loaded yet. Open a game page and try again." }; redraw(); return; }
+    learnState = { running: true, step: "Reading the duel mail…" }; redraw();
+    var added = 0, honorOf = {};
+    function lookup(name) { // the fight record may not carry honor: then it's the player's honor now, from the ranking
+      if (!name) { return Promise.resolve(0); }
+      if (name in honorOf) { return Promise.resolve(honorOf[name]); }
+      return playerRanking().then(function (fn) { return wait(SCAN_GAP).then(function () { return fn({ data: { search: name } }); }); }).then(function (d) {
+        var hit = (d && d.players || []).filter(function (x) { return x.name === name; })[0];
+        honorOf[name] = hit ? +hit.honor || 0 : 0;
+        return honorOf[name];
+      }, function () { honorOf[name] = 0; return 0; });
     }
-    return Math.max(1, Math.round(c * Math.max(0.25, Math.min(4, row.honor / myHonor))));
+    Promise.all([duelTools(), mailboxFn()]).then(function (got) {
+      var kit = got[0], mail = got[1];
+      if (!kit.duel) { throw new Error("the game's fight records weren't recognised (the game may have changed)"); }
+      var ids = [];
+      function page(n) {
+        if (n >= MAIL_PAGES) { return Promise.resolve(); }
+        return (n ? wait(SCAN_GAP) : Promise.resolve()).then(function () { return mail({ data: { tab: "duels", page: n } }); }).then(function (d) {
+          var mails = d && d.mails || [], s = load();
+          mails.forEach(function (m) { if (m.duel && m.duel.id && !duelSeenInLog(s, m.duel.id)) { ids.push(m.duel.id); } });
+          if (mails.length) { return page(n + 1); }
+        });
+      }
+      return page(0).then(function () {
+        function next(i) {
+          if (i >= ids.length) { return Promise.resolve(); }
+          learnState = { running: true, step: "Reading fight " + (i + 1) + " of " + ids.length, done: i, total: ids.length }; redraw();
+          return wait(SCAN_GAP).then(function () { return client.fetchQuery(kit.duel({ data: { id: ids[i] } })); }).then(function (d) {
+            var c = d && d.characters;
+            if (!c || !c.attacker || !c.defender || !d.rewards) { return; }
+            return Promise.all([+c.attacker.honor ? +c.attacker.honor : lookup(c.attacker.name), +c.defender.honor ? +c.defender.honor : c.defender.id === me.id && +me.honor ? +me.honor : lookup(c.defender.name)]).then(function (h) {
+              var s = load();
+              if (duelSeenInLog(s, d.id)) { return; }
+              learnFight(s, d, h[0], h[1], me.id);
+              save(s);
+              added++;
+            });
+          }, function () {}).then(function () { return next(i + 1); });
+        }
+        return next(0);
+      });
+    }).then(function () { learnState = { note: added ? "Learned from " + added + " new fight" + (added === 1 ? "" : "s") + "." : "No new fights in the mail." }; })
+      .catch(function (e) { learnState = { error: String(e && e.message || e) }; }).then(redraw);
+  }
+  function learnHtml(s) {
+    var running = learnState && learnState.running, wins = honorWins(s), lost = honorLosses(s), dd = s.duelDefended, h = "<div class='dqhead' style='margin-top:12px'><span class='t grow'>Learned so far</span><button type='button' data-duellearn" + (running ? " disabled" : "") + " title='Reads the newest pages of your duel mail, one fight at a time. Starts no fights.'>" + (running ? "Reading…" : "Learn from mail") + "</button></div><div class='dqfacts'>";
+    if (wins.length || lost.length) {
+      var c = wins.length >= HONOR_MIN ? Math.round(median(wins.map(function (l) { return l.gain / l.ratio; }))) : 0, l = lost.length >= HONOR_MIN ? Math.round(median(lost.map(function (x) { return -x.gain * x.ratio; }))) : 0;
+      h += "<b>" + wins.length + "</b> won and <b>" + lost.length + "</b> lost attacks" + (c ? " · A win at equal honor pays about <b>+" + c + "</b>" : "") + (l ? " · A lost attack costs about <b>−" + l + "</b>" : "");
+    } else { h += "Nothing yet. Honor is a guess until a few fights are in."; }
+    if (dd && dd.won + dd.lost) { h += "<br>Attacks on you: <b>" + dd.won + "</b> won, <b>" + dd.lost + "</b> lost, honor <b>" + (dd.honor > 0 ? "+" : "") + dd.honor.toLocaleString("en-US") + "</b>"; }
+    h += "</div>";
+    if (running) { h += "<div class='st wait'>" + esc(learnState.step) + "</div>" + (learnState.total ? "<div class='bar' style='margin:6px 0'><i style='width:" + Math.round(learnState.done / learnState.total * 100) + "%'></i></div>" : ""); }
+    if (learnState && learnState.note) { h += "<div class='st ok'>" + esc(learnState.note) + "</div>"; }
+    if (learnState && learnState.error) { h += "<div class='st bad'>Couldn't read the mail: " + esc(learnState.error) + ".</div>"; }
+    return h;
   }
 
   // ===== Personal: gang war =====
@@ -2758,7 +2868,7 @@ function reporter() {
       + (cd ? (myRank ? " · " : "") + (cd > now ? "Free attack in <b>" + leftText(cd - now) + "</b>" : "Free attack <b>ready</b>") : "") + "</div>";
     if (running) { h += "<div class='st wait'>" + esc(duelState.step) + "</div>" + (duelState.total ? "<div class='bar' style='margin:6px 0'><i style='width:" + Math.round(duelState.done / duelState.total * 100) + "%'></i></div>" : ""); }
     if (duelState && duelState.error) { h += "<div class='st bad'>Couldn't scan: " + esc(duelState.error) + ".</div>"; }
-    if (!scan) { return running ? h : h + "<div class='mqnote'>Press Scan to rate the players around your rank. It loads them one by one, about a second each, and starts no fights.</div>"; }
+    if (!scan) { return h + (running ? "" : "<div class='mqnote'>Press Scan to rate the players around your rank. It loads them one by one, about a second each, and starts no fights.</div>") + learnHtml(s); }
     var count = function (min) { return scan.rows.filter(function (r) { return r.win >= min; }).length; };
     h += "<div class='mfilters'>" + [[70, "Beatable 70%+"], [50, "50%+"], [0, "All"]].map(function (o) {
       return "<button type='button' data-duelfilter='" + o[0] + "'" + (duelFilter === o[0] ? " class='on'" : "") + ">" + o[1] + " " + count(o[0]) + "</button>";
@@ -2766,8 +2876,9 @@ function reporter() {
     // Players above you first, best rank on top; those below you after them, faded.
     var rows = scan.rows.filter(function (r) { return r.win >= duelFilter; }), est = {};
     scan.rows.forEach(function (r) { est[r.id] = honorEstimate(s, r, scan.myHonor); });
-    if (duelSort === "honor") { rows = rows.slice().sort(function (a, b) { return (est[b.id] || 0) * b.win - (est[a.id] || 0) * a.win; }); }
-    var learned = (s.duelLog || []).length, honorTip = learned >= HONOR_MIN ? "Learned from " + learned + " of your won duels." : "A rough guess (higher honor pays more) until " + HONOR_MIN + " of your won duels have been seen: " + learned + " so far.";
+    var worth = function (r) { return (est[r.id] || 0) * r.win / 100 - honorLoss(s, r, scan.myHonor) * (100 - r.win) / 100; };
+    if (duelSort === "honor") { rows = rows.slice().sort(function (a, b) { return worth(b) - worth(a); }); }
+    var learned = honorWins(s).length, honorTip = learned >= HONOR_MIN ? "Learned from " + learned + " won attacks." : "A rough guess (higher honor pays more) until " + HONOR_MIN + " won attacks have been seen: " + learned + " so far. Learn from mail fills this in.";
     h += "<div class='dqhead' style='margin-top:0'><span class='grow'>Sort</span><span class='seg'>" + [["rank", "Best rank"], ["honor", "Best honor"]].map(function (o) {
       return "<button type='button' data-duelsort='" + o[0] + "'" + (duelSort === o[0] ? " class='on'" : "") + (o[0] === "honor" ? " title='Honor if you win, weighed by your win chance'" : "") + ">" + o[1] + "</button>";
     }).join("") + "</span></div>";
@@ -2777,13 +2888,13 @@ function reporter() {
       rows.forEach(function (r) {
         var cls = r.win >= 70 ? "hi" : r.win >= 50 ? "md" : "lo";
         h += "<tr" + (r.rank > scan.myRank ? " class='below'" : "") + "><td>#" + r.rank + "</td><td class='nm2'>" + specIcon(r.spec)
-          + "<a class='who' href='/game/player/" + esc(r.id) + "' title='" + esc((r.family ? r.family + ". " : "") + "Open profile") + "'>" + esc(r.name) + "</a></td><td>" + r.level + "</td><td class='w " + cls + "'>" + r.win + "%</td><td title='" + esc(honorTip) + "'>" + (est[r.id] ? (learned >= HONOR_MIN ? "+" : "~") + est[r.id] : "–") + "</td>"
+          + "<a class='who' href='/game/player/" + esc(r.id) + "' title='" + esc((r.family ? r.family + ". " : "") + "Open profile") + "'>" + esc(r.name) + "</a></td><td>" + r.level + "</td><td class='w " + cls + "'>" + r.win + "%</td><td title='" + esc(honorTip + (honorLoss(s, r, scan.myHonor) ? " A lost attack costs about " + honorLoss(s, r, scan.myHonor) + "." : "")) + "'>" + (est[r.id] ? (learned >= HONOR_MIN ? "+" : "~") + est[r.id] : "–") + "</td>"
           + "<td><a class='fight' href='/game/duel/compare/" + esc(r.id) + "' title='Open the game&#39;s fight screen. Nothing starts until you press its button.'>Fight ›</a></td></tr>";
       });
       h += "</tbody></table>";
     }
     var age = Math.max(0, Math.round((now - scan.at) / 60000));
-    return h + "<div class='mqnote'>Scanned " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + (scan.partial ? ", some players couldn't be loaded" : "") + ". Win % is " + DUEL_SIMS + " simulated fights with the game's own formula, using your consumables. A real fight can still go either way.</div>";
+    return h + learnHtml(s) + "<div class='mqnote'>Scanned " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + (scan.partial ? ", some players couldn't be loaded" : "") + ". Win % is " + DUEL_SIMS + " simulated fights with the game's own formula, using your consumables. A real fight can still go either way.</div>";
   }
 
   // Away (vacation): s.away = {id: start of the last away game day}. Set per PC from the 🏖️ button; expired entries are ignored.
@@ -3376,6 +3487,7 @@ function reporter() {
     if (t.hasAttribute("data-duelfilter")) { duelFilter = +t.getAttribute("data-duelfilter"); redraw(); return; }
     if (t.hasAttribute("data-duelsort")) { duelSort = t.getAttribute("data-duelsort"); redraw(); return; }
     if (t.hasAttribute("data-gangscan")) { runGangScan(); return; }
+    if (t.hasAttribute("data-duellearn")) { runDuelLearn(); return; }
     if (t.hasAttribute("data-away")) { setAway(t.getAttribute("data-away")); return; }
     if (t.hasAttribute("data-remind")) { sendRemind(); return; }
     if (t.hasAttribute("data-sort")) { s.sort = t.getAttribute("data-sort"); save(s); redraw(); return; }
@@ -3552,7 +3664,7 @@ function reporter() {
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
