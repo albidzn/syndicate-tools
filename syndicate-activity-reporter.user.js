@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.7.0
+// @version      2.8.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,16 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.7.0";
+  var VERSION = "2.8.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.8.0": [
+      "The panel docks beside the game: it fills the right edge at full height and the game moves over, so nothing is covered. If the window is too small for that, it floats on top. Drag to float, drop on the right edge or double-click to dock again.",
+      "Activity tab: long names no longer push rows onto two lines; tags have their own column.",
+      "Activity tab: quick filters (Under 100, Not registered, Online, Away) and a 14-day trend when you click a member's row.",
+      "Activity tab: boost box with time left, treasury, renewal cost, auto-renew and a Buy button once a boost has ended.",
+      "Minimized bar: at-100 count, next battle with sign-ups, time to reset, and a warning when a boost is ending."
+    ],
     "2.7.0": [
       "Game sound is now a slider, and its low end is much quieter (it follows how loud things sound, so 10% is really quiet).",
       "Activity tab: \"📣 Remind unregistered\" button pings, in the family chat, the members who can fight in a planned war but haven't registered. By button only, nothing automatic.",
@@ -2217,7 +2224,7 @@ function reporter() {
     + "position:fixed;top:12px;right:12px;z-index:2147483646;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;border:2px solid var(--accent);border-radius:10px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.45),var(--glow,0 0 0 transparent);width:min(440px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;text-align:left}"
     + "#ID.miami{--bg:linear-gradient(180deg,#0e2430,#0a1820);--fg:#e4f5f6;--muted:#86aeb6;--line:#15333f;--strong:#21495a;--soft:#12303c;--accent:#22d3c5;--on-accent:#04242a;--up:#ff9ec4;--input:#071319}"
     + "#ID.hk{--bg:linear-gradient(180deg,#121637,#0b0e24);--fg:#e8eaff;--muted:#9097c6;--line:#1d2348;--strong:#2c3466;--soft:#1a2048;--accent:#4db2ff;--on-accent:#0b0e24;--up:#e7a3ff;--input:#080a1c;--glow:0 0 18px rgba(77,178,255,.35)}"
-    + "#ID *{box-sizing:border-box}#ID.min{width:auto;padding:8px 10px}#ID.dragging{opacity:.9}"
+    + "#ID *{box-sizing:border-box}#ID.min{box-sizing:border-box;width:auto;padding:8px 10px}#ID.dragging{opacity:.9}"
     + "#ID.wide{width:min(620px,calc(100vw - 24px))}#ID tr.off td{opacity:.45}"
     + "#ID .filters label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}#ID .filters input{width:64px;margin:0;padding:5px 6px}"
     + "#ID button.name{border:0;padding:0;background:none;font:inherit;text-transform:none;letter-spacing:0;color:var(--fg);cursor:copy;text-align:left}#ID button.name:hover{color:var(--accent)}#ID td a{text-decoration:none}#ID a.who{color:inherit}#ID a.who:hover{color:var(--accent);text-decoration:underline}"
@@ -2236,7 +2243,21 @@ function reporter() {
     + "#ID .idle{font-size:11px;color:var(--muted);white-space:nowrap}#ID table.adv td{text-align:left}"
     + "#ID .links{margin-top:8px;padding:8px;border-radius:8px;background:var(--soft)}#ID .links .lk{display:grid;grid-template-columns:110px 1fr auto;gap:8px;align-items:center}#ID .links .lk button{padding:4px 8px}#ID .links input{margin:2px 0}#ID .links span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
     + "#ID .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:var(--strong);vertical-align:1px}#ID .dot.on{background:#6bb133}"
-    + "#ID .tags{float:right;display:inline-flex;align-items:center;gap:5px;margin-left:6px}#ID .dc{display:inline-flex;color:#8f9bff;cursor:help}#ID .dc.no{color:var(--muted);opacity:.35}"
+    + "#ID .tags{display:inline-flex;align-items:center;gap:5px}#ID table.mem td.nm{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID table.mem td.tg{white-space:nowrap;padding-left:2px;padding-right:2px}"
+    + "#ID tr[data-mid]{cursor:pointer}#ID tr[data-mid]:hover td{background:var(--soft)}#ID tr.open td{background:var(--soft);border-bottom-color:transparent}#ID tr.trend td{background:var(--soft);text-align:left;padding:2px 8px 8px}"
+    + "#ID .chart{position:relative;display:flex;align-items:flex-end;gap:2px;height:46px;margin-top:4px;border-bottom:1px solid var(--strong)}#ID .bc{flex:1;height:100%;display:flex;align-items:flex-end;cursor:help}#ID .b{display:block;width:100%;border-radius:4px 4px 0 0;background:var(--muted)}"
+    + "#ID .b.full{background:#93d36d}#ID .b.mid{background:#e8c46a}#ID .b.low{background:#ff8a8a}#ID .b.zero{background:var(--muted);opacity:.5}#ID .bc.today .b{opacity:.65}"
+    + "#ID .ref{position:absolute;left:0;right:0;border-top:1px dashed var(--muted);opacity:.6;pointer-events:none}#ID .ref span{position:absolute;right:0;bottom:1px;font-size:9px;line-height:1}#ID .ax{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px}"
+    + "#ID .tfacts{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:5px;font-size:11px;color:var(--muted)}#ID .tfacts b{color:var(--fg);font-weight:600}"
+    + "#ID .mfilters{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 4px}#ID .mfilters button{padding:3px 7px;font-size:10.5px;letter-spacing:0;text-transform:none;font-weight:500;border-radius:12px}#ID .mfilters button.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}#ID .nomatch{padding:8px 2px;font-size:12px;color:var(--muted)}"
+    + "#ID .boosts{margin:0 0 6px;padding:6px 8px;border-radius:8px;background:var(--soft);font-size:11.5px;color:var(--muted)}#ID .bo{display:grid;grid-template-columns:82px 1fr auto auto;align-items:center;gap:6px;min-height:21px}#ID .bo b{color:var(--fg);font-weight:600;white-space:nowrap}#ID .bo .left{white-space:nowrap;min-width:44px;text-align:right}"
+    + "#ID .bar{height:6px;border-radius:3px;background:var(--strong);overflow:hidden}#ID .bar i{display:block;height:100%;border-radius:3px;background:var(--accent)}#ID .bo.warn .bar i{background:#e8c46a}#ID .bo.warn .left{color:#e8c46a}#ID .bo.out .left{color:#ff8a8a}#ID .bo button{padding:2px 6px;font-size:10px;letter-spacing:0}#ID .bo button.go{font-weight:700}"
+    + "#ID .trez{margin-top:3px;padding-top:4px;border-top:1px solid var(--strong)}#ID .trez b{color:var(--fg);font-weight:600}#ID .trez.bad{color:#ff8a8a}"
+    + "#ID.dock{box-sizing:border-box;top:0;right:0;height:100vh;max-height:100vh;border-width:0 0 0 2px;border-radius:0;box-shadow:-8px 0 20px rgba(0,0,0,.35)}"
+    + "#ID.compact table{font-size:12px}#ID.compact td,#ID.compact th{padding:3px 4px}#ID.compact table.mem tr[data-mid] td:first-child,#ID.compact table.mem th:first-child{display:none}#ID.compact table.mem tr[data-mid] td:nth-child(6),#ID.compact table.mem th:nth-child(6){display:none}#ID.compact .stats.five .stat b{font-size:16px}#ID.compact .stats.five .stat{padding:5px 4px}#ID.compact .stat span{font-size:9.5px}#ID.compact .top .seg button{padding:4px 5px;font-size:10px}"
+    + "#ID.min .top{flex-wrap:wrap}#ID .mc{display:inline-flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;color:var(--muted);cursor:help}#ID .mc b{color:var(--accent);font-weight:700}#ID .mc.warn,#ID .mc.warn b{color:#e8c46a}#ID .mc i{display:inline-flex;font-style:normal}#ID .mc svg{width:12px;height:12px}#ID .minbtn{display:inline-flex;gap:4px;margin-left:auto}"
+    + "#ID .top .grow{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+    + "#ID .dc{display:inline-flex;color:#8f9bff;cursor:help}#ID .dc.no{color:var(--muted);opacity:.35}"
     + "#ID .tag{font-size:10px;line-height:1.5;padding:0 6px;border-radius:9px;white-space:nowrap;cursor:help}#ID .tag.good{background:rgba(107,177,51,.18);color:#93d36d}#ID .tag.mid{background:rgba(232,196,106,.16);color:#e8c46a}"
     + "#ID .tag.bad{background:rgba(255,138,138,.16);color:#ff8a8a}#ID .tag.new{background:rgba(77,178,255,.18);color:#7cc4ff}"
     + "#ID .st{margin-top:8px;font-size:12px;color:var(--muted)}#ID .st.ok{color:#93d36d}#ID .st.bad{color:#ff8a8a}#ID .st.wait{color:#e8c46a}"
@@ -2329,9 +2350,120 @@ function reporter() {
     if (n > 0) { s.away[id] = dayStart(Date.now()) + (Math.min(n, 365) - 1) * DAY; } else { delete s.away[id]; }
     save(s); redraw();
   }
-  // Member search on the Activity tab (memberQuery, kept until the Family tab is left).
-  var memberQuery = "";
+  // Member search and quick filter on the Activity tab (kept until the Family tab is left). Rows carry their filter flags:
+  // u = under 100 today, r = can fight but isn't registered for a planned war, o = online, a = away.
+  var memberQuery = "", memberFilter = "", trendId = "";
   function nameMatch(lower) { var q = memberQuery.trim().toLowerCase(); return !q || lower.indexOf(q) >= 0; }
+  function rowShown(lower, flags) { return nameMatch(lower) && (!memberFilter || flags.indexOf(memberFilter) >= 0); }
+  function memberFlags(s, m, su) {
+    var miss = ["attack", "defense"].some(function (k) { return su[k] && unregistered(s, [m], su[k]).length; });
+    return (m.today < FULL ? "u" : "") + (miss ? "r" : "") + (m.online ? "o" : "") + (awayUntil(s, m.id) ? "a" : "");
+  }
+  function filterHtml(list, flags, su) {
+    var count = function (f) { return list.filter(function (m) { return flags[m.id].indexOf(f) >= 0; }).length; };
+    return "<div class='mfilters'>" + [["", "All", list.length], ["u", "Under 100", count("u")], ["r", "Not registered", count("r")], ["o", "Online", count("o")], ["a", "Away", count("a")]].map(function (o) {
+      var off = o[0] === "r" && !su.attack && !su.defense;
+      return "<button type='button' data-mfilter='" + o[0] + "'" + (memberFilter === o[0] ? " class='on'" : "") + (off ? " disabled title='No war planned'" : "") + ">" + o[1] + " " + o[2] + "</button>";
+    }).join("") + "</div>";
+  }
+  function applyMemberFilter() {
+    var shown = 0;
+    [].forEach.call(box.querySelectorAll("tr[data-name]"), function (tr) {
+      var on = rowShown(tr.getAttribute("data-name"), tr.getAttribute("data-f") || "");
+      tr.style.display = on ? "" : "none";
+      if (on) { shown++; }
+    });
+    var none = box.querySelector(".nomatch");
+    if (none) { none.style.display = shown ? "none" : ""; }
+  }
+
+  // A member's last 14 finished days plus today, opened by clicking their row. One bar per day, coloured like the table
+  // (100+, 50–99, under 50, 0), on a linear scale with a line at 100. Days without data stay empty.
+  var TREND_DAYS = 14;
+  function trendHtml(s, m, mid, att) {
+    var days = [], top = FULL, known = 0, sum = 0, full = 0, rec = s.records || {}, best = rec.best && rec.best[m.id], rank = rec.rank && rec.rank[m.id], a = att && att[m.id];
+    for (var i = TREND_DAYS; i >= 1; i--) {
+      var t = mid - i * DAY, r = s.hist && s.hist[dayKey(t)], ap = r && r[m.id] ? r[m.id].ap : i === 1 ? m.yesterday : null;
+      if (m.joinedAt && m.joinedAt > t + DAY) { ap = null; }
+      days.push({ t: t, ap: ap });
+      if (ap != null) { known++; sum += ap; if (ap >= FULL) { full++; } top = Math.max(top, ap); }
+    }
+    top = Math.max(top, m.today);
+    days.push({ t: mid, ap: m.today, today: true });
+    var bars = days.map(function (d) {
+      var tip = shortDay(d.t) + (d.today ? " (today so far)" : "") + ": " + (d.ap == null ? "no data" : d.ap.toLocaleString("en-US") + " points");
+      return "<span class='bc" + (d.today ? " today" : "") + "' title='" + tip + "'>" + (d.ap == null ? "" : "<i class='b " + apClass(d.ap) + "' style='height:" + Math.max(d.ap ? 6 : 3, Math.round(d.ap / top * 100)) + "%'></i>") + "</span>";
+    }).join("");
+    var fact = function (label, val) { return "<span>" + label + " <b>" + val + "</b></span>"; }, streak = fullStreak(s, m.id, mid);
+    return "<div class='chart'>" + bars + "<div class='ref' style='bottom:" + Math.round(FULL / top * 100) + "%'><span>100</span></div></div>"
+      + "<div class='ax'><span>" + shortDay(days[0].t).replace(/^\w+ /, "") + "</span><span>today</span></div><div class='tfacts'>"
+      + (known ? fact("At 100+", full + "/" + known + " days") + fact("Average", Math.round(sum / known).toLocaleString("en-US")) : "")
+      + (streak ? fact("Streak", streak + "d") : "")
+      + (best ? fact("Best day", best.ap.toLocaleString("en-US") + " (" + shortDay(+new Date(best.day)).replace(/^\w+ /, "") + ")") : "")
+      + (a && a.wars ? fact("Wars", a.fought + "/" + a.wars) : "")
+      + (m.pos ? fact("Honor rank", "#" + m.pos + (rank && rank.pos < m.pos ? " (best #" + rank.pos + ")" : "")) : "")
+      + (m.joinedAt ? fact("Joined", shortDay(m.joinedAt).replace(/^\w+ /, "")) : "")
+      + "</div>";
+  }
+
+  // The XP and cash boosts at a glance: time left of the 7 days, renewal, auto-renew and the treasury. A boost that has run
+  // out can be bought from here at +25% (same command and rights as auto-renew, after a confirmation).
+  var buyBusy = false;
+  function leftText(ms) {
+    var m = Math.max(0, Math.ceil(ms / 60000));
+    return m >= 1440 ? Math.floor(m / 1440) + "d " + Math.floor(m % 1440 / 60) + "h" : m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + "m";
+  }
+  function boostHtml(s) {
+    var p = last && last.fam.private, now = Date.now();
+    if (!p || !("xpBoost" in p || "xpBoostUntil" in p || p.boostPrices)) { return ""; }
+    var price = p.boostPrices && +p.boostPrices.high, can = !p.rank || p.rank === "godfather" || p.rank === "counselor", gold = p.treasury == null ? null : +p.treasury || 0, soon = 0;
+    var rows = Object.keys(BOOSTS).map(function (k) {
+      var until = boostEnd(p, k), left = until - now, on = left > 0, pct = +p[k + "Boost"] || 0, auto = s.autoBoost && s.autoBoost[k];
+      if (!on || left <= DAY) { soon++; }
+      return "<div class='bo" + (!on ? " out" : left <= DAY ? " warn" : "") + "'><b>" + BOOSTS[k] + (on && pct ? " +" + pct + "%" : "") + "</b>"
+        + "<span class='bar' title='" + (on ? "Ends " + new Date(until).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Not active") + "'><i style='width:" + (on ? Math.max(2, Math.min(100, Math.round(left / (7 * DAY) * 100))) : 0) + "%'></i></span>"
+        + "<span class='left'>" + (on ? leftText(left) : "ended") + "</span>"
+        + "<span>" + (!on && can && price ? "<button type='button' class='go' data-buyboost='" + k + "'" + (buyBusy || gold != null && gold < price ? " disabled" : "") + " title='Buy +" + AUTO_PCT + "% for 7 days: " + price.toLocaleString("en-US") + " family gold'>Buy</button> " : "")
+        + (can ? "<button type='button' data-autoboost='" + k + "'" + (auto ? " class='go'" : "") + " title='Auto-renew on this PC: " + (auto ? "on" : "off") + ". Use it on one PC only.'>Auto " + (auto ? "on" : "off") + "</button>" : "") + "</span></div>";
+    }).join("");
+    var trez = "";
+    if (gold != null) {
+      var missing = price ? price * soon - gold : 0;
+      trez = "<div class='trez" + (missing > 0 ? " bad" : "") + "'>🪙 Treasury <b>" + gold.toLocaleString("en-US") + "</b>" + (price ? " · +" + AUTO_PCT + "% costs <b>" + price.toLocaleString("en-US") + "</b>" : "")
+        + (price && soon && missing > 0 ? " · ⚠️ " + missing.toLocaleString("en-US") + " missing for " + (soon > 1 ? "both boosts" : "the renewal") : price && soon ? " · ✅ renewal covered" : "") + "</div>";
+    }
+    return "<div class='boosts'>" + rows + trez + "</div>";
+  }
+  function buyBoost(kind) {
+    var p = last && last.fam.private, price = p && p.boostPrices && +p.boostPrices.high;
+    if (!price || buyBusy) { return; }
+    if (!confirm("Buy the +" + AUTO_PCT + "% " + BOOSTS[kind] + " boost for 7 days?\n\nCosts " + price.toLocaleString("en-US") + " family gold. The treasury has " + (+p.treasury || 0).toLocaleString("en-US") + ".")) { return; }
+    buyBusy = true; redraw();
+    var famId = last.fam.id;
+    familyCommand().then(function (fn) {
+      return fn({ data: { requestId: crypto.randomUUID(), command: { action: "boost", familyId: famId, kind: kind, percent: AUTO_PCT, price: price } } });
+    }).then(function () { refreshFamily(); }, function (e) { alert("The game said: " + (e && e.message || e)); }).then(function () { buyBusy = false; redraw(); });
+  }
+
+  // The minimized bar: at-100 count, next battle with who's registered, time to reset, and a boost that needs attention.
+  var DRAG_TIP = "Drag to float. Drop on the right edge or double-click to dock beside the game.";
+  function minChips(s, list, full) {
+    if (!last) { return "<span class='mc'>Loading…</span>"; }
+    var h = "<span class='mc' title='Members at 100 points today'><b>" + full + "/" + list.length + "</b></span>", nw = nextWar();
+    if (nw) {
+      var side = warSignups(last.fam)[nw.side.attack ? "attack" : "defense"], n = list.filter(function (m) { return side && side.ids[m.id]; }).length;
+      h += "<span class='mc' title='" + (nw.side.attack ? "Our attack on " : "Defence against ") + esc(nw.side.foe) + ": " + n + " of " + list.length + " registered'><i>" + (nw.side.attack ? ATK_ICON : DEF_ICON) + "</i><b>" + leftText(startOf(nw.w) - Date.now()) + "</b> " + n + "/" + list.length + "</span>";
+    }
+    h += "<span class='mc' title='Until the daily reset'>⏳ <b>" + untilReset() + "</b></span>";
+    var p = last.fam.private, now = Date.now();
+    if (p) {
+      Object.keys(BOOSTS).forEach(function (k) {
+        var left = boostEnd(p, k) - now;
+        if (("xpBoostUntil" in p || "xpBoost" in p) && left <= DAY) { h += "<span class='mc warn' title='" + BOOSTS[k] + " boost " + (left > 0 ? "ends soon" : "has ended") + "'>🚀 <b>" + BOOSTS[k] + " " + (left > 0 ? leftText(left) : "off") + "</b></span>"; }
+      });
+    }
+    return h;
+  }
 
   // War sign-up reminder, by button only: pings (in the family chat) the members who could fight in a planned war but
   // haven't registered. Members who joined too late for that war or are away are left out.
@@ -2411,14 +2543,13 @@ function reporter() {
     var gained = list.reduce(function (a, m) { return a + Math.max(0, m.levels || 0); }, 0);
 
     if (s.min) {
-      box.innerHTML = html + "<div class='top' title='Drag to move, double-click to reset'><span class='t'>Activity</span> <b>" + (last ? full + "/" + list.length + " at 100" : "…") + "</b>"
-        + "<span class='t'>· reset " + untilReset() + "</span><button type='button' class='icon' data-min title='Expand'>&#9662;</button>" + close + "</div>";
+      box.innerHTML = html + "<div class='top' title='" + DRAG_TIP + "'>" + minChips(s, list, full) + "<span class='minbtn'>" + "<button type='button' class='icon' data-min title='Expand'>&#9662;</button>" + close + "</span></div>";
       place(); tipTitles();
       return;
     }
     var view = last && showRecruits ? "recruits" : last && showPlanner ? "planner" : last && showRanks ? "ranks" : "activity";
     if (view !== "activity") { box.className += " wide"; }
-    html += "<div class='top' title='Drag to move, double-click to reset'><span class='t grow'>" + ({ recruits: "Recruits", planner: "War planner", ranks: "Rank suggestions", activity: "Family activity" }[view]) + "</span>"
+    html += "<div class='top' title='" + DRAG_TIP + "'><span class='t grow'>" + ({ recruits: "Recruits", planner: "War planner", ranks: "Rank suggestions", activity: "Activity" }[view]) + "</span>"
       + (view !== "activity" ? "" : "<span class='seg'>" + Object.keys(SORTS).map(function (k) { return "<button type='button' data-sort='" + k + "' class='" + (k === sortBy ? "on" : "") + "'>" + SORTS[k] + "</button>"; }).join("") + "</span>")
       + "<button type='button' class='icon vol' data-vol title='Game sound volume (this PC)'>" + (volume === 0 ? "🔇" : volume < 50 ? "🔉" : "🔊") + " " + volume + "%</button>"
       + "<button type='button' class='icon' data-min title='Minimize'>&ndash;</button>" + close + "</div>";
@@ -2453,22 +2584,28 @@ function reporter() {
         + "<div class='stat'><b>" + (start ? "+" + gained : "–") + "</b><span>levels today</span></div>"
         + "<div class='stat' title='" + esc(warTip) + "'><b class='wk'><i>" + ATK_ICON + "</i>" + (nA == null ? "–" : nA) + " <i>" + DEF_ICON + "</i>" + (nD == null ? "–" : nD) + "</b><span>war sign-ups</span></div>"
         + "<div class='stat'><b>" + untilReset() + "</b><span>until reset</span></div></div>";
-      html += remindHtml(s, list, su);
+      html += boostHtml(s) + remindHtml(s, list, su);
       html += "<input type='search' class='msearch' data-msearch placeholder='Search members…' value='" + esc(memberQuery) + "' autocomplete='off'>";
+      var flags = {};
+      list.forEach(function (m) { flags[m.id] = memberFlags(s, m, su); });
+      html += filterHtml(list, flags, su);
       var key = sortBy === "levels" ? function (m) { return m.levels || 0; } : function (m) { return m[sortBy]; };
       list.sort(function (a, b) { return key(b) - key(a) || b.today - a.today || b.level - a.level; });
       var th = function (k, label, tip) { return "<th" + (k === sortBy ? " class='on'" : "") + (tip ? " title='" + tip + "'" : "") + ">" + label + "</th>"; };
-      html += "<table><thead><tr><th>#</th><th>Member</th>" + th("today", "Today") + th("yesterday", "Yday") + "<th>Level</th>"
+      html += "<table class='mem'><thead><tr><th>#</th><th>Member</th><th></th>" + th("today", "Today") + th("yesterday", "Yday") + "<th>Level</th>"
         + th("levels", "+Lv", "Levels gained today") + "</tr></thead><tbody>";
-      var mid = dayStart(Date.now());
+      var mid = dayStart(Date.now()), att = trendId ? attendance(s, list) : null, shown = 0;
       list.forEach(function (m, i) {
-        html += "<tr data-name='" + esc(m.name.toLowerCase()) + "'" + (nameMatch(m.name.toLowerCase()) ? "" : " style='display:none'") + "><td>" + (i + 1) + "</td><td><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>"
+        var nm = esc(m.name.toLowerCase()), attrs = "data-name='" + nm + "' data-f='" + flags[m.id] + "'" + (rowShown(m.name.toLowerCase(), flags[m.id]) ? "" : " style='display:none'"), open = trendId === m.id;
+        if (rowShown(m.name.toLowerCase(), flags[m.id])) { shown++; }
+        html += "<tr data-mid='" + esc(m.id) + "' " + attrs + (open ? " class='open'" : "") + " title='Click for the 14-day trend'><td>" + (i + 1) + "</td><td class='nm'><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>"
           + (/^\d+$/.test(m.id) ? "<a class='who' href='/game/player/" + m.id + "' title='Open profile'>" + esc(m.name) + "</a>" : esc(m.name))
-          + memberTags(s, m, mid, su) + "</td>"
+          + "</td><td class='tg'>" + memberTags(s, m, mid, su) + "</td>"
           + "<td class='" + apClass(m.today) + "'>" + m.today + "</td><td class='" + apClass(m.yesterday) + "'>" + m.yesterday + "</td><td>" + m.level + "</td>"
           + "<td class='" + (m.levels > 0 ? "up" : "") + "'>" + (m.levels == null ? "" : m.levels > 0 ? "+" + m.levels : "–") + "</td></tr>";
+        if (open) { html += "<tr class='trend' " + attrs + "><td colspan='7'>" + trendHtml(s, m, mid, att) + "</td></tr>"; }
       });
-      html += "</tbody></table>";
+      html += "</tbody></table><div class='nomatch'" + (shown ? " style='display:none'" : "") + ">No members match.</div>";
       // Say where "+Lv" starts counting when it isn't the reset itself (times shown in local time, like the reset).
       if (start && s.day.from < mid - 30 * 60000) { html += "<div class='st'>+Lv counts from " + clock(s.day.from) + ", the last time the family list was seen before the " + clock(mid) + " reset.</div>"; }
       else if (start && s.day.from > mid + 30 * 60000) { html += "<div class='st'>+Lv counts from " + clock(s.day.from) + ", when the family list was first opened after the " + clock(mid) + " reset.</div>"; }
@@ -2544,6 +2681,7 @@ function reporter() {
   function placeTip(text) {
     if (!tipBox || !document.body.contains(tipBox)) {
       tipBox = document.createElement("div");
+      tipBox.setAttribute("data-syn-tip", "");
       tipBox.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;max-width:280px;padding:6px 9px;border-radius:6px;background:rgba(12,8,10,.95);color:#f4e7ea;"
         + "border:1px solid rgba(255,255,255,.18);font:12px/1.4 system-ui,sans-serif;white-space:pre-line;box-shadow:0 6px 18px rgba(0,0,0,.5)";
       document.body.appendChild(tipBox);
@@ -2639,9 +2777,27 @@ function reporter() {
   }
 
   // Drag the panel by its top row. The spot is remembered; double-click the top row to send it back to the corner.
-  var drag = null, pos = load().pos || null;
+  var drag = null, pos = load().pos || null, SNAP = 40;
+  // Docking: every part of the game is sized in vh and centred, with a stage of 132.8vh wide. When the side space fits the
+  // panel, it fills the right edge at full height and the game's root gets narrower, so the game re-centres beside it.
+  // The transform makes the game's own fixed elements (and its toasts) follow its narrower root. Too little room: the panel floats.
+  var STAGE_VH = 1.328, DOCK_MIN = 380, DOCK_MAX = 520, COMPACT = 420, MIN_BAR = 190, dockStyle = null, dockNow = 0;
+  function setDock(w) {
+    if (w === dockNow) { return; }
+    dockNow = w;
+    if (!dockStyle) { dockStyle = document.createElement("style"); document.head.appendChild(dockStyle); }
+    dockStyle.textContent = !w ? "" : "body > div:not(#" + ID + "):not([data-portal]):not([data-syn-tip]){width:calc(100% - " + w + "px)!important;transform:translateX(0)}"
+      + ".mantine-Modal-inner{width:calc(100% - " + w + "px)!important}";
+  }
   function place() {
-    if (!box) { return; }
+    if (!box) { setDock(0); return; }
+    var W = window.innerWidth, free = W - window.innerHeight * STAGE_VH, min = box.classList.contains("min");
+    var dock = !pos && !min && free >= DOCK_MIN ? Math.min(Math.floor(free), DOCK_MAX) : 0;
+    setDock(dock);
+    box.classList.toggle("dock", !!dock);
+    box.style.width = dock ? dock + "px" : "";
+    box.style.maxWidth = min && !pos && free / 2 - 18 >= MIN_BAR ? Math.floor(free / 2) - 18 + "px" : ""; // in the game's side space when it fits
+    box.classList.toggle("compact", !min && box.offsetWidth < COMPACT);
     if (!pos) { box.style.left = ""; box.style.top = ""; box.style.right = ""; return; }
     var x = Math.min(Math.max(0, pos.x), Math.max(0, window.innerWidth - box.offsetWidth));
     var y = Math.min(Math.max(0, pos.y), Math.max(0, window.innerHeight - box.offsetHeight));
@@ -2666,8 +2822,9 @@ function reporter() {
     drag = null;
     box.classList.remove("dragging");
     var rect = box.getBoundingClientRect();
-    pos = { x: Math.round(rect.left), y: Math.round(rect.top) };
-    savePos();
+    // Dropped on the right edge: snap back to the dock.
+    pos = rect.right >= window.innerWidth - SNAP ? null : { x: Math.round(rect.left), y: Math.round(rect.top) };
+    savePos(); place();
   }
   function onDbl(ev) {
     if (!ev.target.closest(".top") || ev.target.closest("button")) { return; }
@@ -2683,10 +2840,7 @@ function reporter() {
       var vv = box.querySelector(".vv"); if (vv) { vv.textContent = volume ? volume + "%" : "Off"; }
       return;
     }
-    if (t.hasAttribute("data-msearch")) {
-      memberQuery = t.value;
-      [].forEach.call(box.querySelectorAll("tr[data-name]"), function (tr) { tr.style.display = nameMatch(tr.getAttribute("data-name")) ? "" : "none"; });
-    }
+    if (t.hasAttribute("data-msearch")) { memberQuery = t.value; applyMemberFilter(); }
   }
   function onChange(ev) {
     var t = ev.target, k = t && t.getAttribute && t.getAttribute("data-rf");
@@ -2701,8 +2855,14 @@ function reporter() {
     var a = ev.target.closest("a[href^='/game/']");
     if (a && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.button === 0) { ev.preventDefault(); gameNavigate(a.getAttribute("href")); return; }
     var t = ev.target.closest("button"), s = load();
-    if (!t) { return; }
-    if (t.hasAttribute("data-close")) { closed = true; if (box) { box.remove(); box = null; } tipX = -1; showTip(); return; }
+    if (!t) {
+      var row = !a && ev.target.closest("tr[data-mid]");
+      if (row) { var mid = row.getAttribute("data-mid"); trendId = trendId === mid ? "" : mid; redraw(); }
+      return;
+    }
+    if (t.hasAttribute("data-close")) { closed = true; if (box) { box.remove(); box = null; } setDock(0); tipX = -1; showTip(); return; }
+    if (t.hasAttribute("data-mfilter")) { memberFilter = t.getAttribute("data-mfilter"); redraw(); return; }
+    if (t.hasAttribute("data-buyboost")) { buyBoost(t.getAttribute("data-buyboost")); return; }
     if (t.hasAttribute("data-min")) { s.min = !s.min; save(s); redraw(); return; }
     if (t.hasAttribute("data-vol")) { showVol = !showVol; redraw(); return; }
     if (t.hasAttribute("data-away")) { setAway(t.getAttribute("data-away")); return; }
@@ -2825,7 +2985,7 @@ function reporter() {
   // sends the daily report, and shows the panel on the Family tab only.
   function tick() {
     var path = location.pathname.replace(/\/+$/, "");
-    if (path !== lastPath) { lastPath = path; closed = false; showPlanner = showRecruits = showRanks = false; memberQuery = ""; } // back on the Family tab: Activity first
+    if (path !== lastPath) { lastPath = path; closed = false; showPlanner = showRecruits = showRanks = false; memberQuery = memberFilter = trendId = ""; } // back on the Family tab: Activity first
     var fresh = readFamily();
     // The game may drop the family data from its cache after leaving the tab; a refresh by keepFresh still lands on the query itself.
     if (!fresh && last && last.query && last.query.state.dataUpdatedAt > last.at) {
@@ -2863,13 +3023,13 @@ function reporter() {
     checkOffline();
     checkStuck();
     tabTitle();
-    if (path !== PAGE || closed) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } lastKey = ""; return; }
+    if (path !== PAGE || closed) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
     if (drag) { return; }
     if (box && document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") { return; } // don't wipe what's being typed
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
