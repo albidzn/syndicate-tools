@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.6.0
+// @version      2.7.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,17 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.6.0";
+  var VERSION = "2.7.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.7.0": [
+      "Game sound is now a slider, and its low end is much quieter (it follows how loud things sound, so 10% is really quiet).",
+      "Activity tab: \"📣 Remind unregistered\" button pings, in the family chat, the members who can fight in a planned war but haven't registered. By button only, nothing automatic.",
+      "Activity tab: member search box, and 🏖️ away marking (hover a row, click 🏖️, enter days). Away members get no idle alerts, evening or sign-up pings until they're back.",
+      "The browser tab shows the next battle's countdown (⚔ attack, 🛡 defence) on every game page.",
+      "The Family tab always opens on Activity.",
+      "Overnight safety: if the family numbers stop refreshing for 15 minutes while nobody is using the game, the tab reloads itself. After an hour or more offline, the leadership chat gets a note with what's being caught up."
+    ],
     "2.6.0": [
       "Panel: new 🔊 button at the top to turn the game's sound down (Off, 10–100%). Saved per PC, works on every game page, and unlike volume extensions it doesn't keep the screens awake."
     ],
@@ -74,11 +82,13 @@ function reporter() {
 
   // Game volume, per PC (s.volume, 0–100). The game plays every sound through Web Audio and connects each one to the
   // context's speakers, so those connections are sent through one gain node per context instead. Works on every game page.
-  var VOLUMES = [0, 10, 25, 50, 75, 100], volume = volumeOf(load()), volGains = [];
+  // The slider is squared into the gain because hearing is logarithmic: 50% on the slider is a quarter of the sound, 10% is 1%.
+  var volume = volumeOf(load()), volGains = [];
   function volumeOf(s) { return typeof s.volume === "number" && s.volume >= 0 && s.volume <= 100 ? s.volume : 100; }
+  function volGain(v) { return (v / 100) * (v / 100); }
   function setVolume(v) {
     volume = v;
-    volGains.forEach(function (g) { g.gain.value = v / 100; });
+    volGains.forEach(function (g) { g.gain.value = volGain(v); });
   }
   (function () {
     if (!window.AudioNode || !window.AudioDestinationNode) { return; }
@@ -88,7 +98,7 @@ function reporter() {
         var ctx = dest.context, g = ctx.__synVolume;
         if (!g) {
           g = ctx.__synVolume = ctx.createGain();
-          g.gain.value = volume / 100;
+          g.gain.value = volGain(volume);
           connect.call(g, dest);
           volGains.push(g);
         }
@@ -697,7 +707,7 @@ function reporter() {
     s.idleSaid = s.idleSaid || {};
     list.forEach(function (m) {
       var n = idleDays(s, m.id, mid), start = dayKey(mid - n * DAY);
-      if (n < IDLE_ALERT || s.idleSaid[m.id] === start) { return; }
+      if (n < IDLE_ALERT || s.idleSaid[m.id] === start || awayUntil(s, m.id)) { return; }
       s.idleSaid[m.id] = start; changed = true;
       // Linked members show as their Discord name, without a ping.
       lines.push("💤 " + who(s, m, []) + " has had **0 activity for " + n + " days in a row** (since " + shortDay(mid - n * DAY) + ").");
@@ -1330,6 +1340,70 @@ function reporter() {
     return ws[0] ? { side: warSide(fam, ws[0]), w: ws[0] } : null;
   }
 
+  // War countdown in the browser tab's title ("⚔ 3h 20m · …" for our attack, "🛡 12m · …" for a defence), on every game page.
+  var TITLE_TAG = /^(?:⚔|🛡) [^·]* · /;
+  function tabTitle() {
+    var nw = nextWar(), base = document.title.replace(TITLE_TAG, ""), pre = "";
+    if (nw) {
+      var m = Math.max(0, Math.ceil((startOf(nw.w) - Date.now()) / 60000));
+      pre = (nw.side.attack ? "⚔ " : "🛡 ") + (m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + "m") + " · ";
+    }
+    if (document.title !== pre + base) { document.title = pre + base; }
+  }
+
+  // Overnight safety on the PC that keeps Discord up to date (the one keepFresh runs on): when the family numbers haven't
+  // refreshed for 15 minutes, reload the game, but only while nobody is using it, the internet works, and at most every 15 minutes.
+  var STUCK = 15 * 60 * 1000, IDLE_USER = 5 * 60 * 1000, lastInput = Date.now(), reloading = false, awakeSince = Date.now(), lastCheck = Date.now();
+  ["pointerdown", "keydown", "wheel"].forEach(function (k) { window.addEventListener(k, function () { lastInput = Date.now(); }, true); });
+  function checkStuck() {
+    var s = load(), at = last ? last.at : STARTED, now = Date.now();
+    if (now - lastCheck > 2 * 60000) { awakeSince = now; } // the PC slept (or the tab was frozen): give the refresh its chance first
+    lastCheck = now;
+    if (!(s.warHook || s.boardHook || s.lvHook) || reloading || now - at < STUCK || now - awakeSince < STUCK) { return; }
+    if (!document.hidden && now - lastInput < IDLE_USER) { return; }
+    if (!navigator.onLine) { return; }
+    var before = 0; try { before = +sessionStorage.getItem("syn-reload") || 0; } catch (e) {}
+    if (now - before < STUCK) { return; }
+    reloading = true;
+    // A reload while the site is down would leave an error page with no script on it, so check the site answers first.
+    fetch("/", { method: "HEAD", cache: "no-store" }).then(function (r) {
+      if (!r.ok) { throw new Error(r.status); }
+      try { sessionStorage.setItem("syn-reload", String(Date.now())); } catch (e) {}
+      location.reload();
+    }).catch(function () { reloading = false; });
+  }
+
+  // Offline report: a heartbeat in its own key (the main one is large) every minute from any game tab. A gap of an hour or
+  // more (no game tab open, PC asleep or off) gets a note in the leadership chat with what is being caught up and what was
+  // lost. The posts themselves catch up by their own checks (daily report, weekly summary, leaderboard, war results).
+  var BEAT = "syn-activity-beat", GAP = HOUR, gap = null, beatAt = 0;
+  function heartbeat() {
+    var now = Date.now();
+    if (now - beatAt < 60000) { return; }
+    var prev = 0; try { prev = +localStorage.getItem(BEAT) || 0; } catch (e) {}
+    if (prev && now - prev >= GAP && !gap) { gap = { from: prev, to: now }; }
+    beatAt = now;
+    try { localStorage.setItem(BEAT, String(now)); } catch (e) {}
+  }
+  function checkOffline() {
+    var s = load();
+    if (!gap || !last || last.at < gap.to - 5 * 60000 || !s.webhook || !canPost("offline")) { return; } // wait for numbers fetched after the gap
+    var from = gap.from, to = gap.to, mid = dayStart(to), catchUp = [], lost = [];
+    gap = null;
+    if (s.sentDay !== dayKey(mid - DAY)) { catchUp.push("daily report for " + shortDay(mid - DAY)); }
+    if (weekStart(from) < weekStart(to) && s.weekSent !== dayKey(weekStart(mid) - 7 * DAY)) { catchUp.push("weekly summary"); }
+    if (s.boardHook) { catchUp.push("leaderboard"); }
+    // A finished day is saved the morning after; days whose "morning after" fell entirely in the gap can't be saved any more.
+    for (var d = dayStart(from); d < mid - DAY; d += DAY) { if (!(s.hist && s.hist[dayKey(d)])) { lost.push(shortDay(d)); } }
+    var wars = warsOf(last.fam).filter(function (w) { var t = startOf(w); return t > from && t < to; }).map(function (w) { return md(warSide(last.fam, w).foe); });
+    var mins = Math.round((to - from) / 60000);
+    var text = "🔌 **The panel was offline** from <t:" + Math.round(from / 1000) + ":f> to <t:" + Math.round(to / 1000) + (to - from < 12 * HOUR ? ":t" : ":f") + "> (" + (mins >= 60 ? Math.floor(mins / 60) + "h " : "") + (mins % 60) + "m)."
+      + (catchUp.length ? "\nCatching up now: " + catchUp.join(", ") + "." : "")
+      + (lost.length ? "\nNo activity history for " + lost.join(", ") + " (it is saved the morning after, while the game is open)." : "")
+      + (wars.length ? "\nWars that started while offline (no 15-minute reminder): " + wars.join(", ") + "." : "");
+    postFor("offline", s.webhook, shout(text));
+  }
+
   // ===== Recruiting finder =====
   // The player ranking marks players looking for a family. It isn't exported like the family queries, so the script
   // rebuilds the ranking page's own request: the game's createServerFn helpers plus the request id from its ranking-*.js file.
@@ -1646,7 +1720,7 @@ function reporter() {
     var s = load(), now = Date.now(), mid = dayStart(now), reset = mid + DAY, day = dayKey(mid);
     if (!s.lvHook || !last || s.eveSaid === day || !canPost("evening")) { return; }
     if (now < reset - EVENING_BEFORE || now > reset - EVENING_LAST || last.at < now - 10 * 60 * 1000) { return; }
-    var under = members(last.fam).filter(function (m) { return m.today < FULL; }).sort(function (a, b) { return b.today - a.today; });
+    var under = members(last.fam).filter(function (m) { return m.today < FULL && !awayUntil(s, m.id); }).sort(function (a, b) { return b.today - a.today; });
     s.eveSaid = day; save(s);
     var users = [], hours = Math.round((reset - now) / HOUR), t = Math.round(reset / 1000);
     var text = under.length
@@ -2169,7 +2243,9 @@ function reporter() {
     + "#ID button{font:600 11px/1.3 system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;border-radius:6px;padding:6px 10px;cursor:pointer;border:1px solid var(--strong);background:transparent;color:var(--fg)}"
     + "#ID button:hover{border-color:var(--accent)}#ID button.go{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}#ID button:disabled{opacity:.45;cursor:default}"
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
-    + "#ID .volrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow .seg button{font-size:12px;padding:4px 7px}"
+    + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
+    + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID button.awaybtn{border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
+    + "#ID input.msearch{margin:8px 0 2px;font-family:inherit}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
@@ -2213,8 +2289,9 @@ function reporter() {
     warsOf(fam).forEach(function (w) {
       var k = w.status !== "preparing" ? null : w.attackerId === fam.id ? "attack" : w.defenderId === fam.id ? "defense" : null;
       if (!k) { return; }
-      var side = o[k] = o[k] || { foes: [], ids: {} };
+      var side = o[k] = o[k] || { foes: [], ids: {}, wars: [] };
       side.foes.push(nameOf(k === "attack" ? w.defender : w.attacker));
+      side.wars.push(w);
       (w.registeredUsers || []).forEach(function (id) { side.ids[String(id)] = true; });
     });
     return o;
@@ -2227,7 +2304,10 @@ function reporter() {
     }).join("");
   }
   function memberTags(s, m, mid, su) {
-    var a = activityTag(s, m, mid), h = a ? "<span class='tag " + a[0] + "' title='" + a[2] + "'>" + a[1] + "</span>" : "";
+    var until = awayUntil(s, m.id), a = activityTag(s, m, mid), h;
+    // Away members show their return date instead of the activity tag; the 🏖️ button shows on hover for everyone else.
+    h = until ? "<button type='button' class='tag away' data-away='" + esc(m.id) + "' title='Away until " + shortDay(until) + " (game days). No idle alerts, evening or war sign-up pings until then. Click to change.'>🏖️ " + shortDay(until).replace(/^\w+ /, "") + "</button>"
+      : "<button type='button' class='awaybtn' data-away='" + esc(m.id) + "' title='Mark as away (vacation)'>🏖️</button>" + (a ? "<span class='tag " + a[0] + "' title='" + a[2] + "'>" + a[1] + "</span>" : "");
     h += warIcons(su, m);
     // Only where members are linked at all (the PC with the Discord settings); elsewhere every icon would look unlinked.
     // The icon goes last, so the icons line up in one column.
@@ -2237,6 +2317,55 @@ function reporter() {
     }
     return h ? "<span class='tags'>" + h + "</span>" : "";
   }
+  // Away (vacation): s.away = {id: start of the last away game day}. Set per PC from the 🏖️ button; expired entries are ignored.
+  function awayUntil(s, id) { var u = s.away && s.away[id]; return u && u >= dayStart(Date.now()) ? u : 0; }
+  function setAway(id) {
+    var s = load(), m = last && members(last.fam).filter(function (x) { return x.id === id; })[0], cur = awayUntil(s, id);
+    var ans = prompt((m ? m.name : "Member") + " is away for how many days, today included? (e.g. 7)\nLeave empty or 0 to clear." + (cur ? "\nNow: away until " + shortDay(cur) + "." : ""), cur ? "" : "7");
+    if (ans === null) { return; }
+    var n = parseInt(ans, 10);
+    s.away = s.away || {};
+    Object.keys(s.away).forEach(function (k) { if (!awayUntil(s, k)) { delete s.away[k]; } });
+    if (n > 0) { s.away[id] = dayStart(Date.now()) + (Math.min(n, 365) - 1) * DAY; } else { delete s.away[id]; }
+    save(s); redraw();
+  }
+  // Member search on the Activity tab (memberQuery, kept until the Family tab is left).
+  var memberQuery = "";
+  function nameMatch(lower) { var q = memberQuery.trim().toLowerCase(); return !q || lower.indexOf(q) >= 0; }
+
+  // War sign-up reminder, by button only: pings (in the family chat) the members who could fight in a planned war but
+  // haven't registered. Members who joined too late for that war or are away are left out.
+  var remindBusy = false;
+  function unregistered(s, list, side) {
+    return list.filter(function (m) {
+      return !side.ids[m.id] && !awayUntil(s, m.id) && side.wars.some(function (w) { return couldFight(s, m, declaredAt(w)); });
+    });
+  }
+  function remindHtml(s, list, su) {
+    if (!s.lvHook || !(su.attack || su.defense)) { return ""; }
+    var miss = {};
+    ["attack", "defense"].forEach(function (k) { if (su[k]) { unregistered(s, list, su[k]).forEach(function (m) { miss[m.id] = 1; }); } });
+    var n = Object.keys(miss).length, ago = s.remindAt ? Math.round((Date.now() - s.remindAt) / 60000) : -1;
+    return "<div class='remind'><button type='button' data-remind" + (n && !remindBusy ? "" : " disabled") + " title='Pings the members who can fight but are not registered yet, in the family chat'>📣 Remind unregistered (" + n + ")</button>"
+      + (remindBusy ? "<span>Sending…</span>" : ago >= 0 && ago < 24 * 60 ? "<span>last sent " + (ago < 60 ? ago + "m" : Math.floor(ago / 60) + "h " + (ago % 60) + "m") + " ago</span>" : "") + "</div>";
+  }
+  function sendRemind() {
+    var s = load(), list = members(last.fam), su = warSignups(last.fam), users = [], lines = [], total = 0;
+    [["attack", "⚔️ Attack on"], ["defense", "🛡️ Defence against"]].forEach(function (k) {
+      var side = su[k[0]];
+      if (!side) { return; }
+      var miss = unregistered(s, list, side), first = side.wars.map(startOf).sort()[0];
+      total += miss.length;
+      lines.push(k[1] + " **" + md(side.foes.join(", ")) + "** · battle <t:" + Math.round(first / 1000) + ":R>");
+      lines.push(miss.length ? "Not registered yet: " + miss.map(function (m) { return who(s, m, users); }).join(", ") : "Everyone who can fight is registered! ✅");
+    });
+    if (!total || !confirm("Ping " + users.length + " linked member" + (users.length === 1 ? "" : "s") + " in the family chat (" + total + " not registered)?")) { return; }
+    remindBusy = true; redraw();
+    var msg = shout("📣 **War sign-up reminder**\n" + lines.join("\n") + "\nRegister on the Family tab in the game. Every fighter counts! 💪", users);
+    post(s.lvHook, msg, null, true).then(function () { var n = load(); n.remindAt = Date.now(); save(n); }, function (e) { alert("Couldn't send: " + (e && e.message || e)); })
+      .then(function () { remindBusy = false; redraw(); });
+  }
+
   function untilReset() {
     var m = Math.max(0, Math.ceil((dayStart(Date.now()) + 864e5 - Date.now()) / 60000));
     return Math.floor(m / 60) + "h " + (m % 60) + "m";
@@ -2265,6 +2394,8 @@ function reporter() {
       box.addEventListener("pointercancel", onUp);
       box.addEventListener("dblclick", onDbl);
       box.addEventListener("change", onChange);
+      box.addEventListener("input", onInput);
+      box.addEventListener("keydown", function (e) { if (e.key === "Escape" && e.target.hasAttribute("data-msearch")) { e.target.value = ""; onInput(e); e.target.blur(); } });
       box.addEventListener("mousemove", function (e) { tipX = e.clientX; tipY = e.clientY; showTip(); });
       box.addEventListener("mouseleave", function () { tipX = -1; showTip(); });
       box.addEventListener("scroll", function () { showTip(); });
@@ -2292,9 +2423,9 @@ function reporter() {
       + "<button type='button' class='icon vol' data-vol title='Game sound volume (this PC)'>" + (volume === 0 ? "🔇" : volume < 50 ? "🔉" : "🔊") + " " + volume + "%</button>"
       + "<button type='button' class='icon' data-min title='Minimize'>&ndash;</button>" + close + "</div>";
     if (showVol) {
-      html += "<div class='volrow'><span>Game sound</span><span class='seg'>" + VOLUMES.map(function (v) {
-        return "<button type='button' data-volume='" + v + "'" + (v === volume ? " class='on'" : "") + ">" + (v ? v + "%" : "Off") + "</button>";
-      }).join("") + "</span></div>";
+      // While the slider has focus the panel doesn't redraw (see tick), so dragging isn't interrupted.
+      html += "<div class='volrow'><span>Game sound</span><input type='range' min='0' max='100' step='1' value='" + volume + "' data-volslider>"
+        + "<b class='vv'>" + (volume ? volume + "%" : "Off") + "</b></div>";
     }
     // The views as tabs right under the title, so switching never needs scrolling.
     if (last) {
@@ -2322,6 +2453,8 @@ function reporter() {
         + "<div class='stat'><b>" + (start ? "+" + gained : "–") + "</b><span>levels today</span></div>"
         + "<div class='stat' title='" + esc(warTip) + "'><b class='wk'><i>" + ATK_ICON + "</i>" + (nA == null ? "–" : nA) + " <i>" + DEF_ICON + "</i>" + (nD == null ? "–" : nD) + "</b><span>war sign-ups</span></div>"
         + "<div class='stat'><b>" + untilReset() + "</b><span>until reset</span></div></div>";
+      html += remindHtml(s, list, su);
+      html += "<input type='search' class='msearch' data-msearch placeholder='Search members…' value='" + esc(memberQuery) + "' autocomplete='off'>";
       var key = sortBy === "levels" ? function (m) { return m.levels || 0; } : function (m) { return m[sortBy]; };
       list.sort(function (a, b) { return key(b) - key(a) || b.today - a.today || b.level - a.level; });
       var th = function (k, label, tip) { return "<th" + (k === sortBy ? " class='on'" : "") + (tip ? " title='" + tip + "'" : "") + ">" + label + "</th>"; };
@@ -2329,7 +2462,7 @@ function reporter() {
         + th("levels", "+Lv", "Levels gained today") + "</tr></thead><tbody>";
       var mid = dayStart(Date.now());
       list.forEach(function (m, i) {
-        html += "<tr><td>" + (i + 1) + "</td><td><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>"
+        html += "<tr data-name='" + esc(m.name.toLowerCase()) + "'" + (nameMatch(m.name.toLowerCase()) ? "" : " style='display:none'") + "><td>" + (i + 1) + "</td><td><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>"
           + (/^\d+$/.test(m.id) ? "<a class='who' href='/game/player/" + m.id + "' title='Open profile'>" + esc(m.name) + "</a>" : esc(m.name))
           + memberTags(s, m, mid, su) + "</td>"
           + "<td class='" + apClass(m.today) + "'>" + m.today + "</td><td class='" + apClass(m.yesterday) + "'>" + m.yesterday + "</td><td>" + m.level + "</td>"
@@ -2542,8 +2675,22 @@ function reporter() {
   }
 
   // The recruit level filters are number fields; they're saved when the field changes (Enter, or clicking elsewhere).
+  // Live updates that mustn't wait for a redraw: the volume while dragging, the member search while typing.
+  function onInput(ev) {
+    var t = ev.target;
+    if (t.hasAttribute("data-volslider")) {
+      setVolume(+t.value);
+      var vv = box.querySelector(".vv"); if (vv) { vv.textContent = volume ? volume + "%" : "Off"; }
+      return;
+    }
+    if (t.hasAttribute("data-msearch")) {
+      memberQuery = t.value;
+      [].forEach.call(box.querySelectorAll("tr[data-name]"), function (tr) { tr.style.display = nameMatch(tr.getAttribute("data-name")) ? "" : "none"; });
+    }
+  }
   function onChange(ev) {
     var t = ev.target, k = t && t.getAttribute && t.getAttribute("data-rf");
+    if (t && t.hasAttribute && t.hasAttribute("data-volslider")) { var sv = load(); sv.volume = +t.value; save(sv); setVolume(sv.volume); t.blur(); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-ra")) { var s0 = load(); s0.recruitAlertMin = Math.max(0, parseInt(t.value, 10) || 0); save(s0); t.blur(); redraw(); return; }
     if (!k) { return; }
     var s = load(), rf = recruitFilter(s);
@@ -2558,7 +2705,8 @@ function reporter() {
     if (t.hasAttribute("data-close")) { closed = true; if (box) { box.remove(); box = null; } tipX = -1; showTip(); return; }
     if (t.hasAttribute("data-min")) { s.min = !s.min; save(s); redraw(); return; }
     if (t.hasAttribute("data-vol")) { showVol = !showVol; redraw(); return; }
-    if (t.hasAttribute("data-volume")) { s.volume = +t.getAttribute("data-volume"); save(s); setVolume(s.volume); redraw(); return; }
+    if (t.hasAttribute("data-away")) { setAway(t.getAttribute("data-away")); return; }
+    if (t.hasAttribute("data-remind")) { sendRemind(); return; }
     if (t.hasAttribute("data-sort")) { s.sort = t.getAttribute("data-sort"); save(s); redraw(); return; }
     if (t.hasAttribute("data-setup")) { showSetup = !showSetup; redraw(); return; }
     if (t.hasAttribute("data-send")) { send(true); return; }
@@ -2677,7 +2825,7 @@ function reporter() {
   // sends the daily report, and shows the panel on the Family tab only.
   function tick() {
     var path = location.pathname.replace(/\/+$/, "");
-    if (path !== lastPath) { lastPath = path; closed = false; }
+    if (path !== lastPath) { lastPath = path; closed = false; showPlanner = showRecruits = showRanks = false; memberQuery = ""; } // back on the Family tab: Activity first
     var fresh = readFamily();
     // The game may drop the family data from its cache after leaving the tab; a refresh by keepFresh still lands on the query itself.
     if (!fresh && last && last.query && last.query.state.dataUpdatedAt > last.at) {
@@ -2711,6 +2859,10 @@ function reporter() {
     backfillAttendance();
     catchUpLog();
     keepFresh();
+    heartbeat();
+    checkOffline();
+    checkStuck();
+    tabTitle();
     if (path !== PAGE || closed) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } lastKey = ""; return; }
     if (drag) { return; }
     if (box && document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") { return; } // don't wipe what's being typed
