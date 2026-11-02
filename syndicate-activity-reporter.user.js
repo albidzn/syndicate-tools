@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.9.0
+// @version      2.10.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.9.0";
+  var VERSION = "2.10.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.10.0": [
+      "Personal tab: new Duels section. Scan the players around your rank and see your win chance against each, from simulated fights with the game's own formula. It only reads; fights start only when you press the game's own button."
+    ],
     "2.9.0": [
       "Panel: new Personal and Family tabs at the top. Personal has the mission picker, so it no longer floats over the game. It opens by itself on the Godfather bar, and Family opens on the Family tab.",
       "The Today / Yesterday / Levels buttons moved next to the member search. The Mission Reader bookmark's own panel stays hidden while this panel is open."
@@ -1000,7 +1003,8 @@ function reporter() {
   var last = null, sending = false, retryAt = 0, error = "", note = "", closed = false, showSetup = false, showLinks = false, showPlanner = false, showRecruits = false, showRanks = false, showVol = false;
   var box = null, lastKey = "", lastPath = location.pathname;
   // Personal (missions) or Family. Arriving on the Godfather bar opens Personal, arriving on the Family tab opens Family.
-  var BAR = "/game/godfather", area = location.pathname.replace(/\/+$/, "") === BAR ? "personal" : "family";
+  var BAR = "/game/godfather", DUELS = "/game/duel", startPath = location.pathname.replace(/\/+$/, "");
+  var area = startPath === BAR || startPath === DUELS ? "personal" : "family", personalTab = startPath === DUELS ? "duels" : "missions";
 
   function send(manual) {
     var mid = dayStart(Date.now()), day = dayKey(mid - 1), s = load();
@@ -2297,7 +2301,7 @@ function reporter() {
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
     + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
     + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID table.mem td.tg{position:relative}#ID button.awaybtn{position:absolute;left:-16px;top:50%;transform:translateY(-50%);border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
-    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
+    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID table.dq .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
@@ -2441,6 +2445,139 @@ function reporter() {
         + "</td><td>" + m.energy + "</td><td class='" + (m === r.bx ? "x" : "") + "'>" + fmt(m.xpr) + "</td><td class='" + (m === r.bc ? "c" : "") + "'>" + fmt(m.cr) + "</td><td class='sc'>" + Math.round(m.score) + "</td></tr>";
     });
     return h + "</tbody></table>" + (onBar ? "" : "<div class='mqnote'>From your last visit. " + link + " for the current missions.</div>");
+  }
+
+  // ===== Personal: duel scan =====
+  // Walks the player ranking around your place, loads each opponent the way the game's own compare screen does, and plays many
+  // simulated fights with the game's own fight code to get a win chance. Only reads: a fight is only ever started by you, in the game.
+  // The real fight's dice are the server's, so this is a chance, not a prediction. Last scan: s.duelScan = {at, myRank, rows}.
+  var DUEL_SIMS = 200, DUEL_RANGES = [25, 50, 100], DUEL_FAIL_MAX = 5, duelRange = 50, duelFilter = 70, duelState = null, duelKit = null;
+  function duelTools() {
+    if (duelKit) { return Promise.resolve(duelKit); }
+    var idx = performance.getEntriesByType("resource").map(function (e) { return e.name; }).filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
+    if (!idx) { return Promise.reject(new Error("the game's files weren't found, reload the game and try again")); }
+    var dir = idx.replace(/index-[\w-]+\.js.*$/, "");
+    return fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
+      var file = function (name) { var m = t.match(new RegExp(name + "-[\\w-]+\\.js")); if (!m) { throw new Error("the game's " + name + " file wasn't found (the game may have changed)"); } return dir + m[0]; };
+      return Promise.all([import(file("computeFight")), import(file("Random")), import(file("duels"))]);
+    }).then(function (got) {
+      var kit = { fight: null, Rnd: null, opponent: null };
+      Object.keys(got[0]).forEach(function (k) { var f = got[0][k]; if (typeof f === "function" && /aggressors/.test(String(f)) && /targets/.test(String(f)) && /fight_result/.test(String(f))) { kit.fight = f; } });
+      Object.keys(got[1]).forEach(function (k) { var f = got[1][k]; if (typeof f === "function" && f.prototype && f.prototype.prob) { kit.Rnd = f; } });
+      // Building a query's options sends nothing, so the opponent query can be told apart by its key.
+      Object.keys(got[2]).forEach(function (k) {
+        var f = got[2][k];
+        if (typeof f !== "function") { return; }
+        try { var o = f({ data: { id: 1 } }); if (o && o.queryKey && /opponent/i.test(JSON.stringify(o.queryKey))) { kit.opponent = f; } } catch (e) {}
+      });
+      if (!kit.fight || !kit.Rnd || !kit.opponent) { throw new Error("the game's duel code wasn't recognised (the game may have changed)"); }
+      duelKit = kit;
+      return kit;
+    });
+  }
+  function duelMe() {
+    var q = client && client.getQueryCache().find({ queryKey: ["getMe"] }), d = q && q.state.data;
+    return d && (Array.isArray(d.combat) ? d : d.user && Array.isArray(d.user.combat) ? d.user : null);
+  }
+  function duelWinChance(kit, me, foe) {
+    var wins = 0, at = new Date(), seed = Math.floor(Math.random() * 2147483647);
+    for (var i = 0; i < DUEL_SIMS; i++) {
+      try {
+        var ev = kit.fight({ aggressors: [me], targets: [foe], rnd: new kit.Rnd(seed + i), useConsumables: true, at: at, maxTurnsPerRound: 1000 }), end = ev[ev.length - 1];
+        if (end && end.winners && end.winners.indexOf(me.id) >= 0) { wins++; }
+      } catch (e) {} // a fight past the game's turn limit doesn't count as a win
+    }
+    return Math.round(wins / DUEL_SIMS * 100);
+  }
+  function runDuelScan() {
+    if (duelState && duelState.running) { return; }
+    if (!client) { findClient(); }
+    var me = duelMe();
+    if (!me) { duelState = { error: "Your fighter hasn't loaded yet. Open a game page and try again." }; redraw(); return; }
+    var myRank = me.ranking && +me.ranking.position || 0;
+    if (!myRank) { duelState = { error: "Your place in the ranking isn't known yet. Open the game's ranking once and try again." }; redraw(); return; }
+    duelState = { running: true, step: "Loading the game's duel code…" }; redraw();
+    var range = duelRange, first = Math.max(1, myRank - range), lastWanted = myRank + Math.ceil(range / 2), found = [], seen = {}, own = {};
+    if (last) { members(last.fam).forEach(function (m) { own[m.id] = true; }); }
+    duelTools().then(function (kit) {
+      return playerRanking().then(function (fn) {
+        var start = first, pages = 0;
+        function list() {
+          if (start > lastWanted || pages >= 20) { return Promise.resolve(); }
+          pages++;
+          return (pages > 1 ? wait(SCAN_GAP) : Promise.resolve()).then(function () { return fn({ data: { start: start } }); }).then(function (d) {
+            var players = d && d.players || [];
+            players.forEach(function (x) {
+              var rank = +x.rank || 0;
+              // Your own family isn't a target.
+              if (rank < first || rank > lastWanted || seen[x.id] || x.id === me.id || own[String(x.id)]) { return; }
+              seen[x.id] = true;
+              found.push({ id: x.id, name: x.name, rank: rank, level: +x.level || 0, spec: x.spec || "", family: x.family && (x.family.name || x.family) || "" });
+            });
+            var lastRank = d && d.batchLast || players.reduce(function (a, x) { return Math.max(a, x.rank || 0); }, 0);
+            if (!players.length || lastRank < start) { return; }
+            start = lastRank + 1;
+            return list();
+          });
+        }
+        return list();
+      }).then(function () {
+        found.sort(function (a, b) { return a.rank - b.rank; });
+        var rows = [], fails = 0;
+        function next(i) {
+          if (i >= found.length || fails >= DUEL_FAIL_MAX) { return Promise.resolve(); }
+          duelState = { running: true, step: "Checking " + (i + 1) + " of " + found.length + ": " + found[i].name, done: i, total: found.length }; redraw();
+          return (i ? wait(SCAN_GAP) : Promise.resolve()).then(function () { return client.fetchQuery(kit.opponent({ data: { id: found[i].id } })); }).then(function (foe) {
+            if (!foe) { fails++; return; }
+            fails = 0;
+            var row = found[i]; row.win = duelWinChance(kit, me, foe); rows.push(row);
+          }, function () { fails++; }).then(function () { return next(i + 1); });
+        }
+        return next(0).then(function () {
+          if (!rows.length && found.length) { throw new Error("no opponent could be loaded"); }
+          var s = load();
+          s.duelScan = { at: Date.now(), myRank: myRank, rows: rows, partial: rows.length < found.length };
+          save(s);
+          duelState = null;
+        });
+      });
+    }).catch(function (e) { duelState = { error: String(e && e.message || e) }; }).then(redraw);
+  }
+  function duelCooldown() {
+    if (!client) { return null; }
+    var at = 0;
+    client.getQueryCache().findAll().forEach(function (q) { var d = q.state && q.state.data; if (d && d.nextDuelAttackAt) { at = new Date(d.nextDuelAttackAt).getTime() || 0; } });
+    return at;
+  }
+  function duelHtml(s) {
+    var scan = s.duelScan, me = duelMe(), running = duelState && duelState.running, myRank = me && me.ranking && +me.ranking.position || scan && scan.myRank || 0, cd = duelCooldown(), now = Date.now();
+    var h = "<div class='dqhead'><span class='grow'>Scan the players around you</span><span class='seg'>" + DUEL_RANGES.map(function (n) {
+      return "<button type='button' data-duelrange='" + n + "'" + (n === duelRange ? " class='on'" : "") + " title='" + n + " places above you and " + Math.ceil(n / 2) + " below'>" + n + "</button>";
+    }).join("") + "</span><button type='button' class='go' data-duelscan" + (running ? " disabled" : "") + ">" + (scan ? "Scan again" : "Scan") + "</button></div>";
+    h += "<div class='dqfacts'>" + (myRank ? "Your rank <b>#" + myRank + "</b>" : "") + (me && me.xp != null && last ? "" : "")
+      + (cd ? (myRank ? " · " : "") + (cd > now ? "Free attack in <b>" + leftText(cd - now) + "</b>" : "Free attack <b>ready</b>") : "") + "</div>";
+    if (running) { h += "<div class='st wait'>" + esc(duelState.step) + "</div>" + (duelState.total ? "<div class='bar' style='margin:6px 0'><i style='width:" + Math.round(duelState.done / duelState.total * 100) + "%'></i></div>" : ""); }
+    if (duelState && duelState.error) { h += "<div class='st bad'>Couldn't scan: " + esc(duelState.error) + ".</div>"; }
+    if (!scan) { return running ? h : h + "<div class='mqnote'>Press Scan to rate the players around your rank. It loads them one by one, about a second each, and starts no fights.</div>"; }
+    var count = function (min) { return scan.rows.filter(function (r) { return r.win >= min; }).length; };
+    h += "<div class='mfilters'>" + [[70, "Beatable 70%+"], [50, "50%+"], [0, "All"]].map(function (o) {
+      return "<button type='button' data-duelfilter='" + o[0] + "'" + (duelFilter === o[0] ? " class='on'" : "") + ">" + o[1] + " " + count(o[0]) + "</button>";
+    }).join("") + "</div>";
+    // Players above you first, best rank on top; those below you after them, faded.
+    var rows = scan.rows.filter(function (r) { return r.win >= duelFilter; });
+    if (!rows.length) { h += "<div class='nomatch'>Nobody in this range at " + duelFilter + "%+. Try a wider scan or a lower filter.</div>"; }
+    else {
+      h += "<table class='dq'><thead><tr><th>Rank</th><th>Player</th><th>Lv</th><th>Win</th><th></th></tr></thead><tbody>";
+      rows.forEach(function (r) {
+        var cls = r.win >= 70 ? "hi" : r.win >= 50 ? "md" : "lo", color = SPEC_COLOR[r.spec] || "var(--muted)";
+        h += "<tr" + (r.rank > scan.myRank ? " class='below'" : "") + "><td>#" + r.rank + "</td><td class='nm2'><span class='cdot' style='background:" + color + "' title='" + esc(SPECS[r.spec] || "") + "'></span>"
+          + "<a class='who' href='/game/player/" + esc(r.id) + "' title='" + esc((r.family ? r.family + ". " : "") + "Open profile") + "'>" + esc(r.name) + "</a></td><td>" + r.level + "</td><td class='w " + cls + "'>" + r.win + "%</td>"
+          + "<td><a class='fight' href='/game/duel/compare/" + esc(r.id) + "' title='Open the game&#39;s fight screen. Nothing starts until you press its button.'>Fight ›</a></td></tr>";
+      });
+      h += "</tbody></table>";
+    }
+    var age = Math.max(0, Math.round((now - scan.at) / 60000));
+    return h + "<div class='mqnote'>Scanned " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + (scan.partial ? ", some players couldn't be loaded" : "") + ". Win % is " + DUEL_SIMS + " simulated fights with the game's own formula, using your consumables. A real fight can still go either way.</div>";
   }
 
   // Away (vacation): s.away = {id: start of the last away game day}. Set per PC from the 🏖️ button; expired entries are ignored.
@@ -2684,7 +2821,10 @@ function reporter() {
         + "<b class='vv'>" + (volume ? volume + "%" : "Off") + "</b></div>";
     }
     if (area === "personal") {
-      box.innerHTML = html + missionHtml() + "<div class='ver'>Activity v" + VERSION + "</div>";
+      html += "<div class='tabs'>" + [["missions", "🎯 Missions"], ["duels", "⚔️ Duels"]].map(function (o) {
+        return "<button type='button' data-ptab='" + o[0] + "'" + (personalTab === o[0] ? " class='on'" : "") + ">" + o[1] + "</button>";
+      }).join("") + "</div>";
+      box.innerHTML = html + (personalTab === "duels" ? duelHtml(s) : missionHtml()) + "<div class='ver'>Activity v" + VERSION + "</div>";
       place(); tipTitles();
       return;
     }
@@ -3023,6 +3163,10 @@ function reporter() {
     if (t.hasAttribute("data-vol")) { showVol = !showVol; redraw(); return; }
     if (t.hasAttribute("data-area")) { area = t.getAttribute("data-area"); redraw(); return; }
     if (t.hasAttribute("data-mqmode")) { setMqMode(t.getAttribute("data-mqmode")); redraw(); return; }
+    if (t.hasAttribute("data-ptab")) { personalTab = t.getAttribute("data-ptab"); redraw(); return; }
+    if (t.hasAttribute("data-duelrange")) { duelRange = +t.getAttribute("data-duelrange"); redraw(); return; }
+    if (t.hasAttribute("data-duelscan")) { runDuelScan(); return; }
+    if (t.hasAttribute("data-duelfilter")) { duelFilter = +t.getAttribute("data-duelfilter"); redraw(); return; }
     if (t.hasAttribute("data-away")) { setAway(t.getAttribute("data-away")); return; }
     if (t.hasAttribute("data-remind")) { sendRemind(); return; }
     if (t.hasAttribute("data-sort")) { s.sort = t.getAttribute("data-sort"); save(s); redraw(); return; }
@@ -3145,7 +3289,10 @@ function reporter() {
     var path = location.pathname.replace(/\/+$/, "");
     if (path !== lastPath) { // closed stays closed until the Family tab or the bar is opened again
       lastPath = path;
-      if (path === PAGE || path === BAR) { closed = false; area = path === BAR ? "personal" : "family"; }
+      if (path === PAGE || path === BAR || path === DUELS) {
+        closed = false; area = path === PAGE ? "family" : "personal";
+        if (path !== PAGE) { personalTab = path === DUELS ? "duels" : "missions"; }
+      }
     }
     var fresh = readFamily();
     // The game may drop the family data from its cache after leaving the tab; a refresh by keepFresh still lands on the query itself.
@@ -3185,15 +3332,15 @@ function reporter() {
     checkStuck();
     tabTitle();
     readMissions();
-    // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab and the bar.
-    if (closed || path !== PAGE && path !== BAR && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
+    // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab, the bar and the duel page.
+    if (closed || path !== PAGE && path !== BAR && path !== DUELS && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
     loadOwnFamily(path);
     if (drag) { return; }
     if (box && document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") { return; } // don't wipe what's being typed
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + duelRange + duelFilter + JSON.stringify(duelState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
