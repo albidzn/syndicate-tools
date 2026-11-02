@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.10.0
+// @version      2.11.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,15 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.10.0";
+  var VERSION = "2.11.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.11.0": [
+      "Personal tab: new Timers section with your gang members, mission booster and food running out, and shop, wanted, gang war and survival timers per city.",
+      "Personal tab: new Gang war section rates the next opponent in each unlocked district with simulated fights, best chance first.",
+      "Duels: honor column and a Best honor sort. It starts as a rough guess and learns from your won duels.",
+      "The game's class icons now show in front of member names, and in the duel and gang war lists."
+    ],
     "2.10.0": [
       "Personal tab: new Duels section. Scan the players around your rank and see your win chance against each, from simulated fights with the game's own formula. It only reads; fights start only when you press the game's own button."
     ],
@@ -1003,8 +1009,9 @@ function reporter() {
   var last = null, sending = false, retryAt = 0, error = "", note = "", closed = false, showSetup = false, showLinks = false, showPlanner = false, showRecruits = false, showRanks = false, showVol = false;
   var box = null, lastKey = "", lastPath = location.pathname;
   // Personal (missions) or Family. Arriving on the Godfather bar opens Personal, arriving on the Family tab opens Family.
-  var BAR = "/game/godfather", DUELS = "/game/duel", startPath = location.pathname.replace(/\/+$/, "");
+  var BAR = "/game/godfather", DUELS = "/game/duel", GANGWAR = "/game/gangwar", startPath = location.pathname.replace(/\/+$/, "");
   var area = startPath === BAR || startPath === DUELS ? "personal" : "family", personalTab = startPath === DUELS ? "duels" : "missions";
+  if (startPath === GANGWAR) { area = "personal"; personalTab = "gang"; }
 
   function send(manual) {
     var mid = dayStart(Date.now()), day = dayKey(mid - 1), s = load();
@@ -2301,7 +2308,7 @@ function reporter() {
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
     + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
     + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID table.mem td.tg{position:relative}#ID button.awaybtn{position:absolute;left:-16px;top:50%;transform:translateY(-50%);border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
-    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID table.dq .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
+    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
@@ -2340,6 +2347,34 @@ function reporter() {
   var SPEC_COLOR = { bully: "#f0852d", tactician: "#f2cf3a", rogue: "#3cc8dc" };
   var ATK_ICON = "<svg viewBox='0 0 16 16' width='13' height='13' aria-hidden='true'><g fill='none' stroke='currentColor' stroke-width='1.8'><circle cx='8' cy='8' r='5.2'/><path d='M8 .8v4M8 11.2v4M.8 8h4M11.2 8h4'/></g></svg>";
   var DEF_ICON = "<svg viewBox='0 0 16 16' width='12' height='13' aria-hidden='true'><path fill='currentColor' d='M8 .6 14.4 3v4.6c0 4-2.7 6.7-6.4 7.9C4.3 14.3 1.6 11.6 1.6 7.6V3Z'/></svg>";
+  // Class icons: the game's own pictures, read from its SpecIcon file. Until they're loaded (or if the file changes) a dot in the class colour stands in.
+  var specIcons = null, specIconsLoading = false;
+  function loadSpecIcons() {
+    if (specIcons || specIconsLoading) { return; }
+    var idx = performance.getEntriesByType("resource").map(function (e) { return e.name; }).filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
+    if (!idx) { return; }
+    specIconsLoading = true;
+    fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
+      var m = t.match(/SpecIcon-[\w-]+\.js/);
+      return m ? fetch(idx.replace(/index-[\w-]+\.js.*$/, m[0])).then(function (r) { return r.text(); }) : "";
+    }).then(function (t) {
+      var map = t.match(/\{bully:(\w+|`[^`]*`),tactician:(\w+|`[^`]*`),rogue:(\w+|`[^`]*`)\}/), found = {};
+      if (map) {
+        ["bully", "tactician", "rogue"].forEach(function (k, i) {
+          var v = map[i + 1];
+          if (v.charAt(0) === "`") { found[k] = v.slice(1, -1); return; }
+          var d = t.match(new RegExp("\\b" + v + "=`([^`]*)`"));
+          if (d) { found[k] = d[1]; }
+        });
+      }
+      specIcons = found; redraw();
+    }, function () { specIcons = {}; });
+  }
+  function specIcon(spec) {
+    var name = esc(SPECS[spec] || ""), src = specIcons && specIcons[spec];
+    if (src) { return "<img class='cico' src=\"" + esc(src) + "\" alt='' title='" + name + "'>"; }
+    return spec ? "<span class='cdot' style='background:" + (SPEC_COLOR[spec] || "var(--muted)") + "' title='" + name + "'></span>" : "";
+  }
   function warSignups(fam) {
     var o = { attack: null, defense: null };
     warsOf(fam).forEach(function (w) {
@@ -2497,7 +2532,7 @@ function reporter() {
     var myRank = me.ranking && +me.ranking.position || 0;
     if (!myRank) { duelState = { error: "Your place in the ranking isn't known yet. Open the game's ranking once and try again." }; redraw(); return; }
     duelState = { running: true, step: "Loading the game's duel code…" }; redraw();
-    var range = duelRange, first = Math.max(1, myRank - range), lastWanted = myRank + Math.ceil(range / 2), found = [], seen = {}, own = {};
+    var myHonor = +me.honor || 0, range = duelRange, first = Math.max(1, myRank - range), lastWanted = myRank + Math.ceil(range / 2), found = [], seen = {}, own = {};
     if (last) { members(last.fam).forEach(function (m) { own[m.id] = true; }); }
     duelTools().then(function (kit) {
       return playerRanking().then(function (fn) {
@@ -2509,10 +2544,11 @@ function reporter() {
             var players = d && d.players || [];
             players.forEach(function (x) {
               var rank = +x.rank || 0;
+              if (x.id === me.id) { myHonor = +x.honor || myHonor; }
               // Your own family isn't a target.
               if (rank < first || rank > lastWanted || seen[x.id] || x.id === me.id || own[String(x.id)]) { return; }
               seen[x.id] = true;
-              found.push({ id: x.id, name: x.name, rank: rank, level: +x.level || 0, spec: x.spec || "", family: x.family && (x.family.name || x.family) || "" });
+              found.push({ id: x.id, name: x.name, rank: rank, level: +x.level || 0, spec: x.spec || "", honor: +x.honor || 0, family: x.family && (x.family.name || x.family) || "" });
             });
             var lastRank = d && d.batchLast || players.reduce(function (a, x) { return Math.max(a, x.rank || 0); }, 0);
             if (!players.length || lastRank < start) { return; }
@@ -2536,13 +2572,177 @@ function reporter() {
         return next(0).then(function () {
           if (!rows.length && found.length) { throw new Error("no opponent could be loaded"); }
           var s = load();
-          s.duelScan = { at: Date.now(), myRank: myRank, rows: rows, partial: rows.length < found.length };
+          s.duelScan = { at: Date.now(), myRank: myRank, myHonor: myHonor, rows: rows, partial: rows.length < found.length };
           save(s);
           duelState = null;
         });
       });
     }).catch(function (e) { duelState = { error: String(e && e.message || e) }; }).then(redraw);
   }
+  // Honor for a win isn't in the game's files, the server decides it, so it's learned from your own won duels (the game keeps each
+  // fight's result in its data, key "getDuelFn"). Model: honor = c × (their honor ÷ yours), c = the median of what the fights so far paid.
+  // Until there are a few fights, c is a guess from the usual size of a win. s.duelLog = [{id, gain, ratio, at}], newest 100.
+  var HONOR_GUESS = 50, HONOR_MIN = 3, HONOR_KEEP = 100, duelSeen = {}, duelSort = "rank";
+  function learnDuels() {
+    var me = client && duelMe();
+    if (!me) { return; }
+    client.getQueryCache().findAll({ queryKey: ["getDuelFn"] }).forEach(function (q) {
+      var d = q.state && q.state.data, c = d && d.characters;
+      if (!d || duelSeen[d.id] || !c || !c.attacker || !c.defender || !d.rewards || !d.rewards.attacker) { return; }
+      duelSeen[d.id] = true;
+      if (c.attacker.id !== me.id || !d.won || !(+d.rewards.attacker.honor > 0)) { return; }
+      var s = load(), scan = s.duelScan, row = scan && scan.rows.filter(function (r) { return r.id === c.defender.id; })[0];
+      var theirs = +c.defender.honor || row && row.honor || 0, mine = +c.attacker.honor || +me.honor || scan && scan.myHonor || 0;
+      if (!theirs || !mine || (s.duelLog || []).some(function (l) { return l.id === d.id; })) { return; }
+      s.duelLog = (s.duelLog || []).concat([{ id: d.id, gain: +d.rewards.attacker.honor, ratio: theirs / mine, at: Date.now() }]).slice(-HONOR_KEEP);
+      save(s);
+    });
+  }
+  function honorEstimate(s, row, myHonor) {
+    if (!row.honor || !myHonor) { return 0; }
+    var log = s.duelLog || [], c = HONOR_GUESS;
+    if (log.length >= HONOR_MIN) {
+      var per = log.map(function (l) { return l.gain / l.ratio; }).sort(function (a, b) { return a - b; });
+      c = per[Math.floor(per.length / 2)];
+    }
+    return Math.max(1, Math.round(c * Math.max(0.25, Math.min(4, row.honor / myHonor))));
+  }
+
+  // ===== Personal: gang war =====
+  // The gang war opponents are in the game's own files, so each district's next opponent is rated with the same simulated fights.
+  // Only opponents you can reach count: unlocked districts in your current city. Bonus opponents aren't rated. s.gangScan = {at, city, rows}.
+  var gangState = null, gangKit = null, CITY_NAMES = { NEW_YORK: "New York", MIAMI: "Miami", HONG_KONG: "Hong Kong" };
+  function gangTools() {
+    if (gangKit) { return Promise.resolve(gangKit); }
+    return duelTools().then(function (kit) {
+      var idx = performance.getEntriesByType("resource").map(function (e) { return e.name; }).filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
+      return fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
+        var m = t.match(/dialogs-[\w-]+\.js/);
+        if (!m) { throw new Error("the game's gang war data wasn't found (the game may have changed)"); }
+        return import(idx.replace(/index-[\w-]+\.js.*$/, m[0]));
+      }).then(function (mod) {
+        var foe = null, list = null;
+        Object.keys(mod).forEach(function (k) {
+          var f = mod[k], src = typeof f === "function" ? String(f) : "";
+          if (src.indexOf("gangwar-weapon-") >= 0) { foe = f; }
+          // Only a plain table lookup gets called here, to see whether it's the table of districts.
+          if (!list && /^(?:function \w*\(\w+\)\{return \w+\[\w+\]\}|\w+=>\w+\[\w+\])$/.test(src)) {
+            try { var r = f("NEW_YORK"); if (Array.isArray(r) && r[0] && "family" in r[0]) { list = f; } } catch (e) {}
+          }
+        });
+        if (!foe || !list) { throw new Error("the game's gang war code wasn't recognised (the game may have changed)"); }
+        gangKit = { fight: kit.fight, Rnd: kit.Rnd, foe: foe, list: list };
+        return gangKit;
+      });
+    });
+  }
+  function runGangScan() {
+    if (gangState && gangState.running) { return; }
+    if (!client) { findClient(); }
+    var me = duelMe(), q = client && client.getQueryCache().find({ queryKey: ["city", "gangwar"] });
+    if (!me) { gangState = { error: "Your fighter hasn't loaded yet. Open a game page and try again." }; redraw(); return; }
+    if (!q) { gangState = { needMap: true }; redraw(); return; }
+    gangState = { running: true }; redraw();
+    var fresh = typeof q.fetch === "function" && q.options && q.options.queryFn ? q.fetch().catch(function () { return q.state.data; }) : Promise.resolve(q.state.data);
+    gangTools().then(function (kit) {
+      return fresh.then(function (d) {
+        var city = d && d.city || me.city, progress = d && d.progress;
+        if (!progress) { throw new Error("the game's gang war progress wasn't found (the game may have changed)"); }
+        var rows = [];
+        kit.list(city).forEach(function (dist) {
+          var at = progress[dist.id], fam = dist.family;
+          if (!fam || at === undefined || at >= fam.opponents.length) { return; }
+          var wins = [];
+          for (var i = at; i < fam.opponents.length; i++) { wins.push(duelWinChance(kit, me, kit.foe(city, dist.id, i))); }
+          var o = fam.opponents[at];
+          rows.push({ district: dist.id, family: fam.name || dist.name || "", level: +o.level || 0, spec: o.spec || "", name: o.name || "", done: at, total: fam.opponents.length, win: wins[0], later: wins.slice(1) });
+        });
+        rows.sort(function (a, b) { return b.win - a.win; });
+        var s = load();
+        s.gangScan = { at: Date.now(), city: city, rows: rows };
+        save(s);
+        gangState = null;
+      });
+    }).catch(function (e) { gangState = { error: String(e && e.message || e) }; }).then(redraw);
+  }
+  function gangHtml(s) {
+    var scan = s.gangScan, running = gangState && gangState.running, q = client && client.getQueryCache().find({ queryKey: ["city", "gangwar"] }), d = q && q.state.data, cd = d && d.nextFightAt && new Date(d.nextFightAt).getTime(), now = Date.now();
+    var h = "<div class='dqhead'><span class='grow'>Who to attack first in this city</span><button type='button' class='go' data-gangscan" + (running ? " disabled" : "") + ">" + (running ? "Rating…" : scan ? "Rate again" : "Rate opponents") + "</button></div>";
+    if (cd) { h += "<div class='dqfacts'>" + (cd > now ? "Free attack in <b>" + leftText(cd - now) + "</b>" : "Free attack <b>ready</b>") + "</div>"; }
+    if (gangState && gangState.needMap) { h += "<div class='mqnote' style='font-size:13px'><a class='golink' href='" + GANGWAR + "'>Open the gang war map</a> once, then press the button again.</div>"; }
+    if (gangState && gangState.error) { h += "<div class='st bad'>Couldn't rate: " + esc(gangState.error) + ".</div>"; }
+    if (!scan) { return gangState ? h : h + "<div class='mqnote'>Rates the next opponent in each district you've unlocked, using simulated fights with the game's own formula. It starts no fights.</div>"; }
+    if (!scan.rows.length) { h += "<div class='nomatch'>No opponents left in the districts you've unlocked in " + esc(CITY_NAMES[scan.city] || scan.city) + ".</div>"; }
+    else {
+      h += "<table class='dq'><thead><tr><th>Lv</th><th>Next opponent</th><th>Done</th><th>Win</th></tr></thead><tbody>";
+      scan.rows.forEach(function (r) {
+        var cls = r.win >= 70 ? "hi" : r.win >= 50 ? "md" : "lo", tip = "District " + (r.district + 1) + (r.later.length ? ". Win chance for the ones after: " + r.later.map(function (w) { return w + "%"; }).join(", ") : "");
+        h += "<tr title='" + esc(tip) + "'><td>" + r.level + "</td><td class='nm2'>" + specIcon(r.spec) + esc(r.family ? "Family " + r.family : r.name) + "</td><td>" + r.done + "/" + r.total + "</td><td class='w " + cls + "'>" + r.win + "%</td></tr>";
+      });
+      h += "</tbody></table>";
+    }
+    var age = Math.max(0, Math.round((now - scan.at) / 60000));
+    return h + "<div class='mqnote'>" + esc(CITY_NAMES[scan.city] || scan.city || "") + ", rated " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + ". Hover a row for the opponents after that one. Win % is " + DUEL_SIMS + " simulated fights, using your consumables. Bonus opponents aren't rated. <a class='golink' href='" + GANGWAR + "'>Open the map</a></div>";
+  }
+
+  // ===== Personal: timers =====
+  // Your gang, mission booster and food come from your player data. Shop, wanted and gang war timers only exist for the city you're in,
+  // so each is remembered per city when the game has loaded it: s.cityTimers = {city: {weapon, food, wanted, gang, survival}}.
+  var GANG_NAMES = { spy: "Spy", pickpocket: "Pickpocket", accountant: "Accountant", coach: "Fitness coach", fence: "Fence" };
+  var BOOSTER_NAMES = { 1: "Bike", 2: "Taxi", 3: "Limousine", 4: "Jet" };
+  var CITY_TIMERS = [["weapon", "Weapon shop"], ["food", "Food shop"], ["wanted", "Wanted"], ["gang", "Gang war"], ["survival", "Survival"]];
+  function timeOf(v) { var t = v ? new Date(v).getTime() : 0; return t > 0 ? t : 0; }
+  function rememberTimers() {
+    var me = client && duelMe();
+    if (!me || !me.city) { return; }
+    var cache = client.getQueryCache(), data = function (k) { var q = cache.find({ queryKey: ["city", k] }); return q && q.state.data; };
+    var shops = data("shops"), wanted = data("wanted"), gang = data("gangwar"), survival = data("survival");
+    var now = { weapon: timeOf(shops && shops.weapon && shops.weapon.nextRefreshAt), food: timeOf(shops && shops.food && shops.food.nextRefreshAt), wanted: timeOf(wanted && wanted.nextAttackAt), gang: timeOf(gang && gang.nextFightAt), survival: timeOf(survival && survival.nextAt) };
+    var s = null, all, cur;
+    Object.keys(now).forEach(function (k) {
+      if (!now[k]) { return; }
+      if (!s) { s = load(); all = s.cityTimers = s.cityTimers || {}; cur = all[me.city] = all[me.city] || {}; }
+      cur[k] = now[k];
+    });
+    if (s && JSON.stringify(cur) !== JSON.stringify(rememberedTimers[me.city] || {})) { rememberedTimers[me.city] = JSON.parse(JSON.stringify(cur)); save(s); }
+  }
+  var rememberedTimers = {};
+  function timersHtml(s) {
+    var me = duelMe(), now = Date.now(), h = "";
+    if (!me) { return "<div class='mqnote'>Your player data hasn't loaded yet.</div>"; }
+    var rows = [];
+    (me.gang || []).forEach(function (g) { if (g) { rows.push({ kind: "Gang", name: GANG_NAMES[g.id] || mqNice(g.id), at: timeOf(g.endsAt), href: "/game/gang" }); } });
+    var b = me.missionBooster;
+    if (b && b.id && timeOf(b.endsAt)) { rows.push({ kind: "Mission booster", name: BOOSTER_NAMES[b.id] || mqNice(String(b.id)), at: timeOf(b.endsAt), href: "/game/shops" }); }
+    (me.food || []).forEach(function (f) {
+      var it = f && f.item;
+      if (it && it.usedAt && it.durationDays) {
+        var end = timeOf(it.usedAt) + it.durationDays * DAY;
+        if (end > now) { rows.push({ kind: "Food", name: mqItemInfo({ id: String(it.id), tier: it.tier || "" }).name, at: end, href: "/game/shops" }); }
+      }
+    });
+    if ((me.food || []).length) { loadMqItems(); }
+    rows.sort(function (x, y) { return x.at - y.at; });
+    h += "<div class='dqhead'><span class='t grow'>Running out</span></div>";
+    if (!rows.length) { h += "<div class='nomatch'>No gang members, booster or food running.</div>"; }
+    else {
+      h += "<table class='dq'><tbody>";
+      rows.forEach(function (r) {
+        var left = r.at - now, cls = left <= 0 ? "lo" : left <= DAY ? "md" : "";
+        h += "<tr><td>" + esc(r.kind) + "</td><td class='nm2'><a class='who' href='" + r.href + "'>" + esc(r.name) + "</a></td><td class='w " + cls + "' style='white-space:nowrap;font-weight:600'>" + (left > 0 ? leftText(left) : "ended") + "</td></tr>";
+      });
+      h += "</tbody></table>";
+    }
+    var cd = duelCooldown(), bossAt = timeOf(me.nextBossFightAt), cell = function (t) { return !t ? "–" : t > now ? leftText(t - now) : "<span style='color:#93d36d'>ready</span>"; };
+    h += "<div class='dqhead' style='margin-top:12px'><span class='t grow'>Free again in</span></div><table class='dq'><thead><tr><th></th>" + Object.keys(CITY_NAMES).map(function (c) { return "<th style='text-align:right" + (c === me.city ? ";color:var(--accent)" : "") + "'>" + CITY_NAMES[c] + "</th>"; }).join("") + "</tr></thead><tbody>";
+    var all = s.cityTimers || {};
+    CITY_TIMERS.forEach(function (t) {
+      h += "<tr><td style='color:var(--fg);white-space:nowrap'>" + t[1] + "</td>" + Object.keys(CITY_NAMES).map(function (c) { return "<td style='text-align:right;white-space:nowrap'>" + cell(all[c] && all[c][t[0]]) + "</td>"; }).join("") + "</tr>";
+    });
+    h += "</tbody></table><div class='dqfacts' style='margin-top:8px'>" + (cd ? "Duel: <b>" + cell(cd) + "</b>" : "") + (bossAt ? (cd ? " · " : "") + "Bonus opponent: <b>" + cell(bossAt) + "</b>" : "") + "</div>";
+    return h + "<div class='mqnote'>The city table fills in as you visit each shop, wanted and gang war page in that city. – means not seen yet.</div>";
+  }
+
   function duelCooldown() {
     if (!client) { return null; }
     var at = 0;
@@ -2564,14 +2764,20 @@ function reporter() {
       return "<button type='button' data-duelfilter='" + o[0] + "'" + (duelFilter === o[0] ? " class='on'" : "") + ">" + o[1] + " " + count(o[0]) + "</button>";
     }).join("") + "</div>";
     // Players above you first, best rank on top; those below you after them, faded.
-    var rows = scan.rows.filter(function (r) { return r.win >= duelFilter; });
+    var rows = scan.rows.filter(function (r) { return r.win >= duelFilter; }), est = {};
+    scan.rows.forEach(function (r) { est[r.id] = honorEstimate(s, r, scan.myHonor); });
+    if (duelSort === "honor") { rows = rows.slice().sort(function (a, b) { return (est[b.id] || 0) * b.win - (est[a.id] || 0) * a.win; }); }
+    var learned = (s.duelLog || []).length, honorTip = learned >= HONOR_MIN ? "Learned from " + learned + " of your won duels." : "A rough guess (higher honor pays more) until " + HONOR_MIN + " of your won duels have been seen: " + learned + " so far.";
+    h += "<div class='dqhead' style='margin-top:0'><span class='grow'>Sort</span><span class='seg'>" + [["rank", "Best rank"], ["honor", "Best honor"]].map(function (o) {
+      return "<button type='button' data-duelsort='" + o[0] + "'" + (duelSort === o[0] ? " class='on'" : "") + (o[0] === "honor" ? " title='Honor if you win, weighed by your win chance'" : "") + ">" + o[1] + "</button>";
+    }).join("") + "</span></div>";
     if (!rows.length) { h += "<div class='nomatch'>Nobody in this range at " + duelFilter + "%+. Try a wider scan or a lower filter.</div>"; }
     else {
-      h += "<table class='dq'><thead><tr><th>Rank</th><th>Player</th><th>Lv</th><th>Win</th><th></th></tr></thead><tbody>";
+      h += "<table class='dq'><thead><tr><th>Rank</th><th>Player</th><th>Lv</th><th>Win</th><th title='" + esc(honorTip) + "'>Honor</th><th></th></tr></thead><tbody>";
       rows.forEach(function (r) {
-        var cls = r.win >= 70 ? "hi" : r.win >= 50 ? "md" : "lo", color = SPEC_COLOR[r.spec] || "var(--muted)";
-        h += "<tr" + (r.rank > scan.myRank ? " class='below'" : "") + "><td>#" + r.rank + "</td><td class='nm2'><span class='cdot' style='background:" + color + "' title='" + esc(SPECS[r.spec] || "") + "'></span>"
-          + "<a class='who' href='/game/player/" + esc(r.id) + "' title='" + esc((r.family ? r.family + ". " : "") + "Open profile") + "'>" + esc(r.name) + "</a></td><td>" + r.level + "</td><td class='w " + cls + "'>" + r.win + "%</td>"
+        var cls = r.win >= 70 ? "hi" : r.win >= 50 ? "md" : "lo";
+        h += "<tr" + (r.rank > scan.myRank ? " class='below'" : "") + "><td>#" + r.rank + "</td><td class='nm2'>" + specIcon(r.spec)
+          + "<a class='who' href='/game/player/" + esc(r.id) + "' title='" + esc((r.family ? r.family + ". " : "") + "Open profile") + "'>" + esc(r.name) + "</a></td><td>" + r.level + "</td><td class='w " + cls + "'>" + r.win + "%</td><td title='" + esc(honorTip) + "'>" + (est[r.id] ? (learned >= HONOR_MIN ? "+" : "~") + est[r.id] : "–") + "</td>"
           + "<td><a class='fight' href='/game/duel/compare/" + esc(r.id) + "' title='Open the game&#39;s fight screen. Nothing starts until you press its button.'>Fight ›</a></td></tr>";
       });
       h += "</tbody></table>";
@@ -2794,6 +3000,7 @@ function reporter() {
       box.addEventListener("scroll", function () { showTip(); });
       document.body.appendChild(box);
     }
+    loadSpecIcons();
     var s = load(), sortBy = SORTS[s.sort] ? s.sort : "today", html = "<style>" + css.replace(/#ID/g, "#" + ID) + "</style>";
     var close = "<button type='button' class='icon' data-close title='Close'>&times;</button>";
     box.className = city() + (s.min ? " min" : "");
@@ -2821,10 +3028,10 @@ function reporter() {
         + "<b class='vv'>" + (volume ? volume + "%" : "Off") + "</b></div>";
     }
     if (area === "personal") {
-      html += "<div class='tabs'>" + [["missions", "🎯 Missions"], ["duels", "⚔️ Duels"]].map(function (o) {
+      html += "<div class='tabs'>" + [["missions", "🎯 Missions"], ["duels", "⚔️ Duels"], ["gang", "🗺️ Gang war"], ["timers", "⏱ Timers"]].map(function (o) {
         return "<button type='button' data-ptab='" + o[0] + "'" + (personalTab === o[0] ? " class='on'" : "") + ">" + o[1] + "</button>";
       }).join("") + "</div>";
-      box.innerHTML = html + (personalTab === "duels" ? duelHtml(s) : missionHtml()) + "<div class='ver'>Activity v" + VERSION + "</div>";
+      box.innerHTML = html + (personalTab === "duels" ? duelHtml(s) : personalTab === "gang" ? gangHtml(s) : personalTab === "timers" ? timersHtml(s) : missionHtml()) + "<div class='ver'>Activity v" + VERSION + "</div>";
       place(); tipTitles();
       return;
     }
@@ -2869,7 +3076,7 @@ function reporter() {
       list.forEach(function (m, i) {
         var nm = esc(m.name.toLowerCase()), attrs = "data-name='" + nm + "' data-f='" + flags[m.id] + "'" + (rowShown(m.name.toLowerCase(), flags[m.id]) ? "" : " style='display:none'"), open = trendId === m.id;
         if (rowShown(m.name.toLowerCase(), flags[m.id])) { shown++; }
-        html += "<tr data-mid='" + esc(m.id) + "' " + attrs + (open ? " class='open'" : "") + " title='Click for the 14-day trend'><td>" + (i + 1) + "</td><td class='nm'><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>"
+        html += "<tr data-mid='" + esc(m.id) + "' " + attrs + (open ? " class='open'" : "") + " title='Click for the 14-day trend'><td>" + (i + 1) + "</td><td class='nm'><span class='dot" + (m.online ? " on" : "") + "' title='" + (m.online ? "Online" : "Offline") + "'></span>" + specIcon(m.spec)
           + (/^\d+$/.test(m.id) ? "<a class='who' href='/game/player/" + m.id + "' title='Open profile'>" + esc(m.name) + "</a>" : esc(m.name))
           + "</td><td class='tg'>" + memberTags(s, m, mid, su) + "</td>"
           + "<td class='" + apClass(m.today) + "'>" + m.today + "</td><td class='" + apClass(m.yesterday) + "'>" + m.yesterday + "</td><td>" + m.level + "</td>"
@@ -3167,6 +3374,8 @@ function reporter() {
     if (t.hasAttribute("data-duelrange")) { duelRange = +t.getAttribute("data-duelrange"); redraw(); return; }
     if (t.hasAttribute("data-duelscan")) { runDuelScan(); return; }
     if (t.hasAttribute("data-duelfilter")) { duelFilter = +t.getAttribute("data-duelfilter"); redraw(); return; }
+    if (t.hasAttribute("data-duelsort")) { duelSort = t.getAttribute("data-duelsort"); redraw(); return; }
+    if (t.hasAttribute("data-gangscan")) { runGangScan(); return; }
     if (t.hasAttribute("data-away")) { setAway(t.getAttribute("data-away")); return; }
     if (t.hasAttribute("data-remind")) { sendRemind(); return; }
     if (t.hasAttribute("data-sort")) { s.sort = t.getAttribute("data-sort"); save(s); redraw(); return; }
@@ -3293,6 +3502,7 @@ function reporter() {
         closed = false; area = path === PAGE ? "family" : "personal";
         if (path !== PAGE) { personalTab = path === DUELS ? "duels" : "missions"; }
       }
+      if (path === GANGWAR) { area = "personal"; personalTab = "gang"; }
     }
     var fresh = readFamily();
     // The game may drop the family data from its cache after leaving the tab; a refresh by keepFresh still lands on the query itself.
@@ -3332,6 +3542,8 @@ function reporter() {
     checkStuck();
     tabTitle();
     readMissions();
+    learnDuels();
+    rememberTimers();
     // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab, the bar and the duel page.
     if (closed || path !== PAGE && path !== BAR && path !== DUELS && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
     loadOwnFamily(path);
@@ -3340,7 +3552,7 @@ function reporter() {
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + duelRange + duelFilter + JSON.stringify(duelState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
