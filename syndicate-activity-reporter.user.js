@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.5.0
+// @version      2.6.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.5.0";
+  var VERSION = "2.6.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.6.0": [
+      "Panel: new 🔊 button at the top to turn the game's sound down (Off, 10–100%). Saved per PC, works on every game page, and unlike volume extensions it doesn't keep the screens awake."
+    ],
     "2.5.0": [
       "Leaderboard: new \"Honor rank\" column with every member's place in the game's player ranking, best first.",
       "Leaderboard records: best honor rank ever reached (top 3), counted from now on."
@@ -68,6 +71,34 @@ function reporter() {
   // { webhook, sentDay, sentAt, base: {id: {name, level, gold}}, prev, min, lock }
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { return {}; } }
   function save(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
+
+  // Game volume, per PC (s.volume, 0–100). The game plays every sound through Web Audio and connects each one to the
+  // context's speakers, so those connections are sent through one gain node per context instead. Works on every game page.
+  var VOLUMES = [0, 10, 25, 50, 75, 100], volume = volumeOf(load()), volGains = [];
+  function volumeOf(s) { return typeof s.volume === "number" && s.volume >= 0 && s.volume <= 100 ? s.volume : 100; }
+  function setVolume(v) {
+    volume = v;
+    volGains.forEach(function (g) { g.gain.value = v / 100; });
+  }
+  (function () {
+    if (!window.AudioNode || !window.AudioDestinationNode) { return; }
+    var connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (dest) {
+      if (dest instanceof AudioDestinationNode) {
+        var ctx = dest.context, g = ctx.__synVolume;
+        if (!g) {
+          g = ctx.__synVolume = ctx.createGain();
+          g.gain.value = volume / 100;
+          connect.call(g, dest);
+          volGains.push(g);
+        }
+        if (this !== g) { arguments[0] = g; }
+      }
+      return connect.apply(this, arguments);
+    };
+    // Other game tabs pick up a change made in the panel.
+    window.addEventListener("storage", function (e) { if (e.key === KEY) { setVolume(volumeOf(load())); } });
+  })();
 
   // The game resets activity at 00:00 UTC, so "yesterday" is the UTC day before today.
   function dayStart(t) { var d = new Date(t); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
@@ -933,7 +964,7 @@ function reporter() {
     }).then(function () { boardBusy = false; redraw(); });
   }
 
-  var last = null, sending = false, retryAt = 0, error = "", note = "", closed = false, showSetup = false, showLinks = false, showPlanner = false, showRecruits = false, showRanks = false;
+  var last = null, sending = false, retryAt = 0, error = "", note = "", closed = false, showSetup = false, showLinks = false, showPlanner = false, showRecruits = false, showRanks = false, showVol = false;
   var box = null, lastKey = "", lastPath = location.pathname;
 
   function send(manual) {
@@ -2137,7 +2168,8 @@ function reporter() {
     + "#ID .st{margin-top:8px;font-size:12px;color:var(--muted)}#ID .st.ok{color:#93d36d}#ID .st.bad{color:#ff8a8a}#ID .st.wait{color:#e8c46a}"
     + "#ID button{font:600 11px/1.3 system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;border-radius:6px;padding:6px 10px;cursor:pointer;border:1px solid var(--strong);background:transparent;color:var(--fg)}"
     + "#ID button:hover{border-color:var(--accent)}#ID button.go{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}#ID button:disabled{opacity:.45;cursor:default}"
-    + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}"
+    + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
+    + "#ID .volrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow .seg button{font-size:12px;padding:4px 7px}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
@@ -2257,7 +2289,13 @@ function reporter() {
     if (view !== "activity") { box.className += " wide"; }
     html += "<div class='top' title='Drag to move, double-click to reset'><span class='t grow'>" + ({ recruits: "Recruits", planner: "War planner", ranks: "Rank suggestions", activity: "Family activity" }[view]) + "</span>"
       + (view !== "activity" ? "" : "<span class='seg'>" + Object.keys(SORTS).map(function (k) { return "<button type='button' data-sort='" + k + "' class='" + (k === sortBy ? "on" : "") + "'>" + SORTS[k] + "</button>"; }).join("") + "</span>")
+      + "<button type='button' class='icon vol' data-vol title='Game sound volume (this PC)'>" + (volume === 0 ? "🔇" : volume < 50 ? "🔉" : "🔊") + " " + volume + "%</button>"
       + "<button type='button' class='icon' data-min title='Minimize'>&ndash;</button>" + close + "</div>";
+    if (showVol) {
+      html += "<div class='volrow'><span>Game sound</span><span class='seg'>" + VOLUMES.map(function (v) {
+        return "<button type='button' data-volume='" + v + "'" + (v === volume ? " class='on'" : "") + ">" + (v ? v + "%" : "Off") + "</button>";
+      }).join("") + "</span></div>";
+    }
     // The views as tabs right under the title, so switching never needs scrolling.
     if (last) {
       html += "<div class='tabs'>" + [["activity", "data-home", "📊 Activity"], ["planner", "data-planner", "⚔️ War planner"], ["recruits", "data-recruits", "🧲 Recruits"], ["ranks", "data-ranks", "👑 Ranks"]].map(function (o) {
@@ -2519,6 +2557,8 @@ function reporter() {
     if (!t) { return; }
     if (t.hasAttribute("data-close")) { closed = true; if (box) { box.remove(); box = null; } tipX = -1; showTip(); return; }
     if (t.hasAttribute("data-min")) { s.min = !s.min; save(s); redraw(); return; }
+    if (t.hasAttribute("data-vol")) { showVol = !showVol; redraw(); return; }
+    if (t.hasAttribute("data-volume")) { s.volume = +t.getAttribute("data-volume"); save(s); setVolume(s.volume); redraw(); return; }
     if (t.hasAttribute("data-sort")) { s.sort = t.getAttribute("data-sort"); save(s); redraw(); return; }
     if (t.hasAttribute("data-setup")) { showSetup = !showSetup; redraw(); return; }
     if (t.hasAttribute("data-send")) { send(true); return; }
@@ -2677,7 +2717,7 @@ function reporter() {
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
