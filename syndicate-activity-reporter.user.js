@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.8.2
+// @version      2.8.3
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.8.2";
+  var VERSION = "2.8.3";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.8.3": [
+      "Boost box: shows the cost for both boosts next to the single price, and how long the treasury keeps both boosts running at today's price. Hover for the details."
+    ],
     "2.8.2": [
       "The docked panel now stays visible on every game page. When the window is too small to dock, or you dragged the panel away, it floats on the Family tab only."
     ],
@@ -2448,10 +2451,27 @@ function reporter() {
     var trez = "";
     if (gold != null) {
       var missing = price ? price * soon - gold : 0;
-      trez = "<div class='trez" + (missing > 0 ? " bad" : "") + "'>🪙 Treasury <b>" + gold.toLocaleString("en-US") + "</b>" + (price ? " · +" + AUTO_PCT + "% costs <b>" + price.toLocaleString("en-US") + "</b>" : "")
+      var runway = price ? goldRunway(p, gold, price, now) : null;
+      trez = "<div class='trez" + (missing > 0 ? " bad" : "") + "'>🪙 Treasury <b>" + gold.toLocaleString("en-US") + "</b>"
+        + (runway && runway.until > now ? " · <span title='At today&#39;s price, with both boosts kept running: " + runway.buys + " more renewal" + (runway.buys === 1 ? "" : "s") + ", " + runway.left.toLocaleString("en-US") + " gold left over. Both boosts are paid for until " + shortDay(runway.until) + ". Donations and price changes move this date.'>lasts <b>" + spanText(runway.until - now) + "</b> (to " + shortDay(runway.until).replace(/^\w+ /, "") + ")</span>" : "")
+        + (price ? "<br>+" + AUTO_PCT + "% costs <b>" + price.toLocaleString("en-US") + "</b> each · <b>" + (price * 2).toLocaleString("en-US") + "</b> for both" : "")
         + (price && soon && missing > 0 ? " · ⚠️ " + missing.toLocaleString("en-US") + " missing for " + (soon > 1 ? "both boosts" : "the renewal") : price && soon ? " · ✅ renewal covered" : "") + "</div>";
     }
     return "<div class='boosts'>" + rows + trez + "</div>";
+  }
+  // How long the treasury keeps both boosts running: each boost is renewed for 7 days when it ends, whichever ends first
+  // being paid first, until the gold can't pay the next one. Paid until = the moment the first boost would run out.
+  function goldRunway(p, gold, price, now) {
+    var ends = Object.keys(BOOSTS).map(function (k) { return Math.max(now, boostEnd(p, k)); }), buys = 0;
+    while (gold >= price && buys < 1000) {
+      var first = ends[0] <= ends[1] ? 0 : 1;
+      ends[first] += 7 * DAY; gold -= price; buys++;
+    }
+    return { until: Math.min(ends[0], ends[1]), buys: buys, left: gold };
+  }
+  function spanText(ms) {
+    var d = Math.floor(ms / DAY);
+    return d >= 14 ? Math.floor(d / 7) + "w " + (d % 7) + "d" : leftText(ms);
   }
   function buyBoost(kind) {
     var p = last && last.fam.private, price = p && p.boostPrices && +p.boostPrices.high;
