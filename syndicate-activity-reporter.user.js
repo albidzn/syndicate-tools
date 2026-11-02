@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.8.0
+// @version      2.8.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.8.0";
+  var VERSION = "2.8.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.8.1": [
+      "Panel docking: a click on the top bar no longer counts as a drag, so the panel stays docked. A panel left at the right edge by an older version docks by itself."
+    ],
     "2.8.0": [
       "The panel docks beside the game: it fills the right edge at full height and the game moves over, so nothing is covered. If the window is too small for that, it floats on top. Drag to float, drop on the right edge or double-click to dock again.",
       "Activity tab: long names no longer push rows onto two lines; tags have their own column.",
@@ -2221,7 +2224,7 @@ function reporter() {
     } catch (e) { return "ny"; }
   }
   var css = "#ID{--bg:#1d1015;--fg:#f4e7ea;--muted:#b2939b;--line:#2d1820;--strong:#43252f;--soft:#2a1720;--accent:#ff4b5c;--on-accent:#fff;--up:#f5a0b4;--input:#120a0e;"
-    + "position:fixed;top:12px;right:12px;z-index:2147483646;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;border:2px solid var(--accent);border-radius:10px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.45),var(--glow,0 0 0 transparent);width:min(440px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;text-align:left}"
+    + "position:fixed;top:12px;right:12px;z-index:2147483646;scrollbar-width:thin;scrollbar-color:var(--strong) transparent;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;border:2px solid var(--accent);border-radius:10px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.45),var(--glow,0 0 0 transparent);width:min(440px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;text-align:left}"
     + "#ID.miami{--bg:linear-gradient(180deg,#0e2430,#0a1820);--fg:#e4f5f6;--muted:#86aeb6;--line:#15333f;--strong:#21495a;--soft:#12303c;--accent:#22d3c5;--on-accent:#04242a;--up:#ff9ec4;--input:#071319}"
     + "#ID.hk{--bg:linear-gradient(180deg,#121637,#0b0e24);--fg:#e8eaff;--muted:#9097c6;--line:#1d2348;--strong:#2c3466;--soft:#1a2048;--accent:#4db2ff;--on-accent:#0b0e24;--up:#e7a3ff;--input:#080a1c;--glow:0 0 18px rgba(77,178,255,.35)}"
     + "#ID *{box-sizing:border-box}#ID.min{box-sizing:border-box;width:auto;padding:8px 10px}#ID.dragging{opacity:.9}"
@@ -2265,7 +2268,7 @@ function reporter() {
     + "#ID button:hover{border-color:var(--accent)}#ID button.go{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}#ID button:disabled{opacity:.45;cursor:default}"
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
     + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
-    + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID button.awaybtn{border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
+    + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID table.mem td.tg{position:relative}#ID button.awaybtn{position:absolute;left:-16px;top:50%;transform:translateY(-50%);border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
     + "#ID input.msearch{margin:8px 0 2px;font-family:inherit}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
@@ -2777,7 +2780,7 @@ function reporter() {
   }
 
   // Drag the panel by its top row. The spot is remembered; double-click the top row to send it back to the corner.
-  var drag = null, pos = load().pos || null, SNAP = 40;
+  var drag = null, pos = load().pos || null, SNAP = 40, DRAG_MIN = 5, posChecked = false;
   // Docking: every part of the game is sized in vh and centred, with a stage of 132.8vh wide. When the side space fits the
   // panel, it fills the right edge at full height and the game's root gets narrower, so the game re-centres beside it.
   // The transform makes the game's own fixed elements (and its toasts) follow its narrower root. Too little room: the panel floats.
@@ -2792,6 +2795,11 @@ function reporter() {
   function place() {
     if (!box) { setDock(0); return; }
     var W = window.innerWidth, free = W - window.innerHeight * STAGE_VH, min = box.classList.contains("min");
+    // A spot saved at the right edge (older versions also saved one on a plain click) counts as docked.
+    if (pos && !posChecked && !min && !drag) {
+      posChecked = true; box.style.width = "";
+      if (pos.x + box.offsetWidth >= W - SNAP) { pos = null; savePos(); }
+    }
     var dock = !pos && !min && free >= DOCK_MIN ? Math.min(Math.floor(free), DOCK_MAX) : 0;
     setDock(dock);
     box.classList.toggle("dock", !!dock);
@@ -2807,20 +2815,24 @@ function reporter() {
   function onDown(ev) {
     if (ev.button !== 0 || !ev.target.closest(".top") || ev.target.closest("button")) { return; }
     var rect = box.getBoundingClientRect();
-    drag = { dx: ev.clientX - rect.left, dy: ev.clientY - rect.top };
+    drag = { dx: ev.clientX - rect.left, dy: ev.clientY - rect.top, sx: ev.clientX, sy: ev.clientY, moved: false };
     box.setPointerCapture(ev.pointerId);
     box.classList.add("dragging");
     ev.preventDefault();
   }
   function onMove(ev) {
     if (!drag) { return; }
+    if (!drag.moved && Math.abs(ev.clientX - drag.sx) + Math.abs(ev.clientY - drag.sy) < DRAG_MIN) { return; } // a plain click on the top row is not a drag
+    drag.moved = true;
     pos = { x: ev.clientX - drag.dx, y: ev.clientY - drag.dy };
     place();
   }
   function onUp() {
     if (!drag) { return; }
+    var moved = drag.moved;
     drag = null;
     box.classList.remove("dragging");
+    if (!moved) { return; }
     var rect = box.getBoundingClientRect();
     // Dropped on the right edge: snap back to the dock.
     pos = rect.right >= window.innerWidth - SNAP ? null : { x: Math.round(rect.left), y: Math.round(rect.top) };
