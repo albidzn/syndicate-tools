@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.16.1
+// @version      2.16.2
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.16.1";
+  var VERSION = "2.16.2";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.16.2": [
+      "Timers: the bonus opponent no longer shows ready when there's none left to fight. It shows which district has one open, or a reward waiting."
+    ],
     "2.16.1": [
       "The mission timer is now a draining strip under the Personal and Family buttons, so it shows on every tab. Click it to open the Godfather bar."
     ],
@@ -3082,12 +3085,18 @@ function reporter() {
       h += "</tbody></table>";
     }
     var cd = duelCooldown(), bossAt = timeOf(me.nextBossFightAt), cell = function (t) { return !t ? "–" : t > now ? leftText(t - now) : "<span style='color:#93d36d'>ready</span>"; };
+    // Each district has one bonus opponent, so the timer only matters while one is left to fight. The map's data says, for the current city.
+    var gq = client && client.getQueryCache().find({ queryKey: ["city", "gangwar"] }), quests = gq && gq.state.data && gq.state.data.cityQuests, bossText = "";
+    if (Array.isArray(quests)) {
+      var bossIn = function (st) { return quests.filter(function (q) { return q.status === st; }).map(function (q) { return q.district + 1; }); }, wonBoss = bossIn("FIGHT_WON"), openBoss = bossIn("FIGHT_AVAILABLE");
+      bossText = wonBoss.length ? "reward waiting, district " + wonBoss.join(", ") : openBoss.length ? "district " + openBoss.join(", ") + " · " + cell(bossAt || 1) : "none to fight";
+    }
     h += "<div class='dqhead' style='margin-top:12px'><span class='t grow'>Free again in</span></div><table class='dq'><thead><tr><th></th>" + Object.keys(CITY_NAMES).map(function (c) { return "<th style='text-align:right" + (c === me.city ? ";color:var(--accent)" : "") + "'>" + CITY_NAMES[c] + "</th>"; }).join("") + "</tr></thead><tbody>";
     var all = s.cityTimers || {};
     CITY_TIMERS.forEach(function (t) {
       h += "<tr><td style='color:var(--fg);white-space:nowrap'>" + t[1] + "</td>" + Object.keys(CITY_NAMES).map(function (c) { return "<td style='text-align:right;white-space:nowrap'>" + cell(all[c] && all[c][t[0]]) + "</td>"; }).join("") + "</tr>";
     });
-    h += "</tbody></table><div class='dqfacts' style='margin-top:8px'>" + (cd ? "Duel: <b>" + cell(cd) + "</b>" : "") + (bossAt ? (cd ? " · " : "") + "Bonus opponent: <b>" + cell(bossAt) + "</b>" : "") + "</div>";
+    h += "</tbody></table><div class='dqfacts' style='margin-top:8px'>" + (cd ? "Duel: <b>" + cell(cd) + "</b>" : "") + (bossText ? (cd ? " · " : "") + "Bonus opponent: <b>" + bossText + "</b>" : "") + "</div>";
     return h + "<div class='mqnote'>The city table fills in as you visit each shop, wanted and gang war page in that city. – means not seen yet.</div>";
   }
 
