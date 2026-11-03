@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.15.1
+// @version      2.16.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.15.1";
+  var VERSION = "2.16.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.16.0": [
+      "Missions: shows when your running mission is ready, your energy, and for the best mission of your filter how much is missing and when you'll have enough. Missions you can't afford yet show in yellow."
+    ],
     "2.15.1": [
       "Duels: per-player honor. From 121 real fights: a win pays about 5.8% of their honor × (their honor ÷ yours), and the loser loses 80% of what the winner gets. The column shows win and loss, and Best honor weighs both by your win chance."
     ],
@@ -2396,7 +2399,7 @@ function reporter() {
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
     + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
     + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID table.mem td.tg{position:relative}#ID button.awaybtn{position:absolute;left:-16px;top:50%;transform:translateY(-50%);border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
-    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .lvline{margin:0 0 6px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted);cursor:help}#ID .lvline b{color:var(--fg);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
+    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .mqstat{margin:0 0 5px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted)}#ID .mqstat b{color:var(--fg);font-weight:600}#ID .mqstat.warn,#ID .mqstat.warn b{color:#e8c46a}#ID .mqstat.ok,#ID .mqstat.ok b{color:#93d36d}#ID .lvline{margin:0 0 6px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted);cursor:help}#ID .lvline b{color:var(--fg);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
@@ -2515,7 +2518,7 @@ function reporter() {
     var q = client && client.getQueryCache().find({ queryKey: ["getAvailableQuests"] }), got = q ? mqPick(q.state.data, 0) : [];
     if (!got.length) { return; }
     missions = got.map(function (m) {
-      return { name: mqNice(m.giver), energy: m.energy, xp: m.xp || 0, cash: m.cash || 0, item: m.item && m.item.id ? { id: String(m.item.id), tier: m.item.tier || "" } : null };
+      return { id: m.id, name: mqNice(m.giver), energy: m.energy, xp: m.xp || 0, cash: m.cash || 0, item: m.item && m.item.id ? { id: String(m.item.id), tier: m.item.tier || "" } : null };
     }).filter(function (m) { return m.energy > 0; });
     if (missions.some(function (m) { return m.item; })) { loadMqItems(); }
   }
@@ -2551,6 +2554,41 @@ function reporter() {
     });
     return r;
   }
+  // The running mission, from the game's data ("getActiveQuest"): {questId, startedAt, data: {seconds}}. Seconds left, or null when none is running.
+  function missionRunning() {
+    var q = client && client.getQueryCache().find({ queryKey: ["getActiveQuest"] }), d = q && q.state.data;
+    if (!d || !d.data || typeof d.data.seconds !== "number" || !d.startedAt) { return null; }
+    var m = missions.filter(function (x) { return x.id != null && x.id === d.questId; })[0];
+    return { left: Math.max(0, Math.ceil(d.data.seconds - (Date.now() - new Date(d.startedAt).getTime()) / 1000)), name: m ? m.name : "" };
+  }
+  function missionKey() { var run = missionRunning(), me = duelMe(); return (run ? run.left : "") + "|" + (me ? me.energy : ""); }
+  function clockText(sec) { return sec >= 3600 ? leftText(sec * 1000) : Math.floor(sec / 60) + ":" + ("0" + sec % 60).slice(-2); }
+  // Energy goes up by 1 every 13 minutes by the clock: at :00, :13, :26, :39 and :52 of each hour (UTC minutes, the same in most time zones).
+  var ENERGY_STEP = 13, ENERGY_MAX = 100;
+  function energyTickAfter(t) {
+    var d = new Date(t), next = Math.ceil((d.getUTCMinutes() + 1) / ENERGY_STEP) * ENERGY_STEP;
+    if (next >= 60) { d.setUTCHours(d.getUTCHours() + 1, 0, 0, 0); } else { d.setUTCMinutes(next, 0, 0); }
+    return d.getTime();
+  }
+  // When there's enough energy for `cost`: the time of the tick that gets there.
+  function energyReadyAt(have, cost) {
+    var t = Date.now(), n = Math.ceil(cost - have - 1e-9);
+    for (var i = 0; i < n; i++) { t = energyTickAfter(t); }
+    return t;
+  }
+  function missionStatusHtml(best) {
+    var me = duelMe(), run = missionRunning(), h = "";
+    if (run) {
+      h += "<div class='mqstat" + (run.left ? "" : " ok") + "'>" + (run.left ? "⏱ " + (run.name ? esc(run.name) + " " : "Mission ") + "ready in <b>" + clockText(run.left) + "</b> (" + clock(Date.now() + run.left * 1000) + ")" : "✅ " + (run.name ? esc(run.name) : "Your mission") + " is <b>ready</b>") + "</div>";
+    }
+    if (me && typeof me.energy === "number" && best) {
+      var have = me.energy, short = best.energy - have;
+      h += "<div class='mqstat" + (short > 0 ? " warn" : "") + "'>⚡ Energy <b>" + have.toFixed(1) + "</b> · " + esc(best.name) + " needs <b>" + best.energy + "</b>"
+        + (short > 0 ? ": short by <b>" + short.toFixed(1) + "</b>, enough in <b>" + leftText(energyReadyAt(have, best.energy) - Date.now()) + "</b> (" + clock(energyReadyAt(have, best.energy)) + ")" + (me.familyDrinks > 0 ? ". A free family drink gives +20" : "")
+          : ", enough for <b>" + Math.floor(have / best.energy + 1e-9) + "</b> run" + (Math.floor(have / best.energy + 1e-9) === 1 ? "" : "s")) + "</div>";
+    }
+    return h;
+  }
   function mqBadge(it) { return "<span class='ib" + (it.rare ? " rare" : "") + "' style='--c:" + it.color + "'>" + esc(it.label) + "</span>"; }
   function missionHtml() {
     var onBar = lastPath === BAR, mode = mqMode(), fmt = function (v) { return v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }); };
@@ -2558,14 +2596,15 @@ function reporter() {
     if (!missions.length) { return "<div class='mqnote' style='font-size:13px;margin-top:12px'>" + (onBar ? "Waiting for the missions to load…" : link + " to see the best mission.") + "</div>"; }
     var r = mqRank(mode), h = "<div class='mqhead'><span class='t grow'>" + MQ_MODES[mode].title + "</span><span class='seg'>" + Object.keys(MQ_MODES).map(function (k) {
       return "<button type='button' data-mqmode='" + k + "'" + (k === mode ? " class='on'" : "") + ">" + MQ_MODES[k].label + "</button>";
-    }).join("") + "</span></div><div class='pick'>" + esc(r.bs.name) + "</div>"
+    }).join("") + "</span></div><div class='pick'>" + esc(r.bs.name) + "</div>" + missionStatusHtml(r.bs)
       + "<div class='lead'>Most XP per energy: <b class='x'>" + esc(r.bx.name) + "</b> · Most cash per energy: <b class='c'>" + esc(r.bc.name) + "</b></div>"
       + "<table class='mq'><thead><tr><th>Mission</th><th>Energy</th><th>XP/E</th><th>Cash/E</th><th>Score</th></tr></thead><tbody>";
+    var meNow = duelMe(), energyNow = meNow && typeof meNow.energy === "number" ? meNow.energy : null;
     missions.forEach(function (m) {
       var it = m.item ? mqItemInfo(m.item) : null;
       h += "<tr class='" + (m === r.bs ? "best" : "") + (it && it.rare ? " rare" : "") + "'" + (it ? " style='--c:" + it.color + "'" : "") + "><td><span class='nm'>" + esc(m.name) + "</span>"
         + (it ? mqBadge(it) + "<div class='mqitem'>" + (it.img ? "<img src='" + esc(it.img) + "' alt=''>" : "") + "<span>" + esc(it.name) + "</span></div>" : "")
-        + "</td><td>" + m.energy + "</td><td class='" + (m === r.bx ? "x" : "") + "'>" + fmt(m.xpr) + "</td><td class='" + (m === r.bc ? "c" : "") + "'>" + fmt(m.cr) + "</td><td class='sc'>" + Math.round(m.score) + "</td></tr>";
+        + "</td><td" + (energyNow != null && m.energy > energyNow ? " style='color:#e8c46a' title='Enough energy in " + leftText(energyReadyAt(energyNow, m.energy) - Date.now()) + "'" : "") + ">" + m.energy + "</td><td class='" + (m === r.bx ? "x" : "") + "'>" + fmt(m.xpr) + "</td><td class='" + (m === r.bc ? "c" : "") + "'>" + fmt(m.cr) + "</td><td class='sc'>" + Math.round(m.score) + "</td></tr>";
     });
     return h + "</tbody></table>" + (onBar ? "" : "<div class='mqnote'>From your last visit. " + link + " for the current missions.</div>");
   }
@@ -3210,7 +3249,9 @@ function reporter() {
   function minChips(s, list, full) {
     if (!last) { return "<span class='mc'>Loading…</span>"; }
     var h = "<span class='mc' title='Members at 100 points today'><b>" + full + "/" + list.length + "</b></span>", nw = nextWar();
-    if (lastPath === BAR && missions.length) { var mode = mqMode(); h = "<span class='mc' title='" + MQ_MODES[mode].title + "'>🎯 <b>" + esc(mqRank(mode).bs.name) + "</b></span>" + h; }
+    var runNow = missionRunning();
+    if (runNow) { h = "<span class='mc" + (runNow.left ? "" : " warn") + "' title='" + esc(runNow.name || "Your mission") + "'>🎯 <b>" + (runNow.left ? clockText(runNow.left) : "ready") + "</b></span>" + h; }
+    else if (lastPath === BAR && missions.length) { var mode = mqMode(); h = "<span class='mc' title='" + MQ_MODES[mode].title + "'>🎯 <b>" + esc(mqRank(mode).bs.name) + "</b></span>" + h; }
     if (nw) {
       var side = warSignups(last.fam)[nw.side.attack ? "attack" : "defense"], n = list.filter(function (m) { return side && side.ids[m.id]; }).length;
       h += "<span class='mc' title='" + (nw.side.attack ? "Our attack on " : "Defence against ") + esc(nw.side.foe) + ": " + n + " of " + list.length + " registered'><i>" + (nw.side.attack ? ATK_ICON : DEF_ICON) + "</i><b>" + leftText(startOf(nw.w) - Date.now()) + "</b> " + n + "/" + list.length + "</span>";
@@ -3856,7 +3897,7 @@ function reporter() {
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + (area === "personal" && personalTab === "missions" ? missionKey() : "") + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
