@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.17.1
+// @version      2.18.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,14 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.17.1";
+  var VERSION = "2.18.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.18.0": [
+      "Family chat posts: far more wording for level-ups, activity, streaks, donations and reminders, some of it silly. Recent lines don't repeat.",
+      "Family chat posts now also change their bot name and sometimes show as a coloured card or with big text. Leadership and war room posts stay as they were.",
+      "The family level post says when the next level is due."
+    ],
     "2.17.1": [
       "Your damage: shows your weapon's bonus against each class, like a rifle's +15% against Rogues."
     ],
@@ -300,6 +305,285 @@ function reporter() {
       }]
     };
   }
+  // Every family chat post picks its wording from here, so no two look alike. {x} is filled in by the caller. A line starting with
+  // "# ", "## ", "### ", "> " or "-# " shows big, as a quote or small in Discord. See say() for how they're picked.
+  var LINES = {
+    asFamily: ["Syndicate Activity", "The Consigliere", "Nonna's Scoreboard", "Paulie Two-Levels", "Family Gossip", "The Barber Heard", "Sal from the Bakery", "Cannoli Courier", "The Neighborhood Watch", "Uncle Grind"],
+    asMoney: ["Vinnie the Accountant", "The Cash Counter", "Totally Legal Laundromat", "Syndicate Treasury", "Department of Envelopes", "The Bagman"],
+
+    levelLow: [
+      "🎉 {who} just reached **level {lv}**! The rookie has teeth! 🦷",
+      "🐣 **Level {lv}** for {who}! Yesterday carrying bags, tomorrow carrying the family.",
+      "🎈 {who} hit **level {lv}**. Someone give this rising star a tiny fedora! 🎩",
+      "### 📈 {who} → level {lv}\nThe street is starting to learn the name.",
+      "🍝 {who} is now **level {lv}**! That earns a seat at the kids' table. Progress!",
+      "🧢 Level **{lv}**, {who}! Keep this up and they'll let you hold the good cannoli.",
+      "> *\"Who's that?\"*\n> *\"{who}. Level {lv}. Remember the name.\"*",
+      "🚲 {who} reached **level {lv}**. Next stop: a car that actually starts. 🚗",
+      "📣 Ding! {who} is **level {lv}**. Only {next} is next, no pressure!",
+      "🍕 **Level {lv}** unlocked by {who}! Pizza's on the new kid. That's how it works."
+    ],
+    levelMid: [
+      "🎉 {who} just reached **level {lv}**! Respect! 🎩",
+      "🥂 **Level {lv}**! {who} is officially a problem for the other families.",
+      "## 🔔 DING! Level {lv}\n{who} keeps climbing and the neighbors are getting nervous.",
+      "🥃 Pour one for {who}: **level {lv}** and still hungry. Level {next}, you're next.",
+      "💼 {who} hit **level {lv}**. The promotion comes with a nicer suit and worse enemies.",
+      "🗞️ **THE DAILY RACKET:** Local legend {who} reaches level {lv}. Police baffled.",
+      "🎯 {who} is **level {lv}**! Word is even the pigeons report to them now. 🐦",
+      "🚬 *leans back in chair* … Level {lv}, {who}. Not bad. Not bad at all.",
+      "📈 Stonks: {who} at **level {lv}**. Do not bet against this one.",
+      "> Word on the street: {who} just hit **level {lv}**.\n> The street is impressed.",
+      "🍾 {who} reached **level {lv}**! That's {next} on the horizon. Somebody hide the rivals.",
+      "🔥 **Level {lv}**. {who} didn't ask for permission. Well done! 👏"
+    ],
+    levelHigh: [
+      "🐐 {who} just reached **level {lv}**. At this point the game should be paying rent to them.",
+      "## 👑 LEVEL {lv}\n{who} is playing a different game than the rest of us.",
+      "🏔️ **Level {lv}**: {who} can see their house from up there. And yours. And who's in it.",
+      "🕴️ {who} hit **level {lv}**. Other families now just send fruit baskets. 🧺",
+      "🚨 Level {lv} confirmed for {who}. Please stop, the rest of us have jobs.",
+      "🎩 **Level {lv}**, {who}. Nobody's asking anymore how. They're asking what it costs.",
+      "🗿 {who}. Level {lv}. No further comment.",
+      "> \"How's the grind?\"\n> \"Level {lv},\" said {who}, without looking up.",
+      "⚰️ Rivals of {who} are advised to update their wills: **level {lv}** has been reached.",
+      "🦾 {who} reached **level {lv}**! Touch grass? They don't even know what grass is. Respect."
+    ],
+    levelBig: [
+      "# 🏛️ LEVEL {lv} 🏛️\n{who} just walked into the history books and put their feet up. 👑",
+      "# 💥 {lv} 💥\nThat's the level {who} just hit. Everybody take your hat off. 🎩",
+      "## 🎆 BIG ONE ALERT: LEVEL {lv} 🎆\n{who} did it! Drinks are on the family tonight! 🥂🥂🥂",
+      "🚨🎉🚨 **LEVEL {lv}** 🚨🎉🚨\n{who} just hit a number the rest of us tell our grandchildren about.",
+      "# 👑 {who}\n### Level {lv}. Kiss the ring. 💍"
+    ],
+
+    ap500: [
+      "🔥 {who} hit **500 activity** today! On fire! 🔥",
+      "🔥 {who} just cracked **500 activity** today! Warming up nicely! 💪",
+      "🔥 **500 activity** for {who} today! Keep that engine running! 🚂",
+      "☕ {who} is at **500 activity** and the coffee hasn't even kicked in.",
+      "🏃 **500 activity**, {who}! Does the family need to check on you? Blink twice.",
+      "🧯 Somebody bring a fire extinguisher: {who} hit **500 activity** today.",
+      "📊 Accounting flagged {who}: **500 activity** today. That's suspiciously productive.",
+      "### 🔥 500 today\n{who} didn't come here to make friends. Well, a few. Mostly to grind.",
+      "🍝 {who} has done **500 activity** today. Nonna says eat something.",
+      "💪 500 down, {who}. Your keyboard would like a word with HR.",
+      "🛞 **500 activity** from {who}! The wheels are officially off the wagon."
+    ],
+    ap1000: [
+      "🚨💥 **ABSOLUTE MENACE ALERT** 💥🚨\n{who} just SMASHED **1,000 activity** today! 🔥🔥🔥 Somebody stop them! 🏆👑",
+      "💥💥💥 **1,000 ACTIVITY** 💥💥💥\n{who} is UNSTOPPABLE today! 🚀🔥 The family bows down! 🙇",
+      "⚡🔥 **ONE. THOUSAND. ACTIVITY.** 🔥⚡\n{who} is built different! 🦾🏆 Legend status unlocked! 👑",
+      "# 🚨 1,000 ACTIVITY 🚨\n{who}, has anyone seen you eat today? Anyone? 🍽️",
+      "## 🧠 Medical update\n{who} reached **1,000 activity** today. Doctors say go outside. {who} says no.",
+      "🤖 **1,000 activity.** We've run the tests on {who}. Results: not human. 🛸",
+      "🏆 Four digits. **1,000 activity**. {who} has left the group chat and entered the record books.",
+      "🕯️ Light a candle for everyone trying to keep up with {who}: **1,000 activity** today.",
+      "> They said it couldn't be done.\n> They said go to bed.\n> {who} did **1,000 activity** anyway. 🔥",
+      "🛑 Stop. Everybody stop. {who} just did **1,000 activity**. Go home, it's over."
+    ],
+
+    rush3: [
+      "⚡ {who} gained **+{n} levels** today! Leveling machine! 🚀",
+      "📈 **+{n} levels** in one day for {who}! Climbing fast! 🧗",
+      "⚡ {who} is on a level rush: **+{n} today**! Who can keep up? 🏃💨",
+      "🛗 {who} took the elevator today: **+{n} levels** and counting.",
+      "🎰 Jackpot! {who} rolled **+{n} levels** today. The house is not happy.",
+      "🍝 {who} has inhaled **+{n} levels** today like it's Sunday lunch.",
+      "📉 Everyone else's rank: down. {who}: **+{n} levels** today. Coincidence?",
+      "### 🚀 +{n} today\n{who} is in a hurry. We're not asking why.",
+      "🏎️ **+{n} levels** today. {who} just passed you on the inside. Wave!",
+      "🧗 {who} is taking the levels three at a time: **+{n}** today."
+    ],
+    rush5: [
+      "🚨💥 **LEVEL EXPLOSION** 💥🚨\n{who} just blasted through **+{n} LEVELS** today! 🚀🚀🚀 Somebody call the fire department! 🔥🧯",
+      "☄️🔥 **+{n} LEVELS IN ONE DAY!** 🔥☄️\n{who} is absolutely UNSTOPPABLE! 🦾⚡ The leaderboard is shaking! 📈💥",
+      "💥⚡ **{n} LEVELS. ONE DAY.** ⚡💥\n{who} has gone full beast mode! 🐉🔥 Bow down to the grind boss! 🙇",
+      "# 🧨 +{n} LEVELS TODAY\n{who} isn't leveling up. {who} is leaving orbit. 🛰️",
+      "## 🕵️ Investigation opened\n{who} gained **+{n} levels** in one day. Nobody saw a thing. Nobody ever does.",
+      "🌪️ A level tornado has been spotted over {who}: **+{n} today**. Secure your rankings.",
+      "> \"How many levels did you get today?\"\n> \"Yes,\" said {who}. **(+{n})**",
+      "🏁 Race's over, everyone. {who} did **+{n} levels** today and is already asking what's next."
+    ],
+
+    streak7: [
+      "🔥 {who} hit 100+ activity **7 days in a row**! Consistency boss! 👑",
+      "📅 **One full week** at 100+ for {who}! That's a habit now. A beautiful one. 🔥",
+      "🗓️ 7 days, 7 times 100+. {who} clocks in like the rent is due.",
+      "🔥 {who} has a **7-day streak**. The couch is starting to file missing person reports. 🛋️",
+      "### 🔥 Week one: done\n{who} has hit 100+ for **7 days straight**. Don't break the chain!"
+    ],
+    streak14: [
+      "🔥🔥 {who} — **14 days in a row** at 100+! Two weeks of pure grind! 💪",
+      "📆 **Two weeks straight** at 100+! {who} doesn't take days off, days take {who} off. 🔥",
+      "🧱 14 days. Brick by brick, {who} is building something. Possibly an empire.",
+      "🔥🔥 **14-day streak** for {who}! Family's starting to whisper about it. In a good way.",
+      "## 🔥🔥 14 in a row\n{who} is making the rest of us look like we're on vacation. 🏖️"
+    ],
+    streak30: [
+      "🔥🔥🔥 **30-DAY STREAK!** 🔥🔥🔥\n{who} hit 100+ every single day for a month! Absolute legend! 🏆👑",
+      "# 🗓️ 30 DAYS\n{who} hit 100+ every day for **a whole month**. Not one excuse. 🏆",
+      "🕰️ A month of 100+ days from {who}. You could set your watch by this. 🔥🔥🔥",
+      "🎖️ For **30 straight days** of service, {who} receives the family's highest honor: a slightly better cannoli. 🏆"
+    ],
+    streak60: [
+      "🌋🔥 **60 DAYS IN A ROW!** 🔥🌋\n{who} is a machine! Two months without missing a day! 🤖🏆",
+      "# 🌋 60 DAYS\n{who}: two months of 100+ every day. Is this a person or a very dedicated cron job? 🤖",
+      "🧬 **60-day streak.** Scientists want to study {who}. The family said no comment.",
+      "🏔️ Two months. Every day. 100+. {who} isn't on a streak anymore, it's a lifestyle. 🔥"
+    ],
+    streak100: [
+      "💯💯💯 **ONE HUNDRED DAYS IN A ROW** 💯💯💯\n{who} has entered the Hall of Fame! 🏛️👑🔥",
+      "# 💯 100 DAYS 💯\n{who}. One hundred. In a row. They're putting up a statue. 🗿👑",
+      "🏛️ **100 straight days** at 100+. {who} is no longer a member of the family. {who} *is* the family. 👑",
+      "📜 Let it be written: on this day {who} completed **100 days in a row**. Tell your children. 🔥🔥🔥"
+    ],
+
+    famLevel: [
+      "🏰🎉 **{fam}** just reached **family level {lv}**! 🎉🏰\nThanks to everyone grinding for it! 💪🔥",
+      "# 🏰 FAMILY LEVEL {lv}\n**{fam}** just got bigger. Other families, please update your insurance. 🧾",
+      "🍾 Pop the good stuff: **{fam}** is now **family level {lv}**! That's on every single one of you! 🥂",
+      "📈 **Family level {lv}!** The empire grows. The rent stays the same. Well done, **{fam}**! 🏰",
+      "## 🎆 Level {lv}\n**{fam}** levelled up. Nonna made a cake. It's a very threatening cake. 🎂",
+      "🏗️ New floor just got added to the **{fam}** building: **family level {lv}**! 🏰💪",
+      "🗞️ **THE DAILY RACKET:** **{fam}** reaches family level {lv}. Sources say \"it was the grinding\". 📰",
+      "🍝 Sunday dinner is extra big this week. **{fam}** just hit **family level {lv}**! 🎉",
+      "> A family is measured by its loyalty.\n> And by its level. Which is now **{lv}**. 🏰🔥",
+      "👑 Everybody take a bow: **{fam}**, **family level {lv}**! Every 100 activity day got us here! 💯"
+    ],
+
+    record: [
+      "👑 **NEW RECORD!** {who} just beat the best day ever with **{ap} AP** today! 🔥",
+      "# 👑 NEW RECORD\n{who} has done **{ap} AP** today. Nobody in the family has ever done more. 🏆",
+      "📜 The record books have been burned and rewritten: **{ap} AP** today by {who}! 🔥",
+      "🚨 Best day ever, broken. {who}. **{ap} AP**. It's only a matter of time until they beat it again.",
+      "🏆 Hold my cannoli: {who} just set a new all-time best with **{ap} AP**! 🍰",
+      "## 🗿 All-time best: {ap} AP\nCongratulations to {who}, and our condolences to the old record.",
+      "⚰️ Here lies the old record. Killed today by {who} with **{ap} AP**. It didn't see it coming.",
+      "🥇 {who} just did what no one here has done: **{ap} AP** in one day! New family record! 🔥"
+    ],
+
+    don1: [
+      "💰 {who} donated **{gold} gold** to the family treasury. Thank you! 🙏",
+      "🪙 **{gold} gold** from {who}! The family remembers. 🙏",
+      "📒 Noted in the book: {who}, **{gold} gold**, no questions asked. Grazie! 🤌",
+      "🧾 {who} put **{gold} gold** in the envelope. Clean, on time, respectful. 💰",
+      "🍝 {who} donated **{gold} gold**. That buys a lot of meatballs. Thank you! 🙏",
+      "💼 A small briefcase from {who} arrived: **{gold} gold**. Much appreciated!",
+      "🤝 **{gold} gold** from {who}. That's what family is for.",
+      "🐷 The piggy bank says thank you to {who} for **{gold} gold**! 🪙"
+    ],
+    don2: [
+      "💎 {who} donated **{gold} gold** to the family treasury! That's huge, thank you! 🙌🔥",
+      "💼💼 Two briefcases, one legend: {who} dropped **{gold} gold** in the treasury! 🙌",
+      "### 💎 {gold} gold\nFrom {who}. The accountant had to sit down for a second. 🙏",
+      "🤌 **{gold} gold** from {who}. Very generous. Very legal. Thank you! 💰",
+      "🎩 Hats off to {who}! **{gold} gold** just went into the family treasury! 🔥",
+      "📈 The treasury went up, Vinnie's blood pressure went down. Thanks {who}, **{gold} gold**! 💎",
+      "🚚 An armored truck pulled up. It's from {who}. **{gold} gold**! 🙌"
+    ],
+    don3: [
+      "👑💰 **{gold} GOLD** 💰👑\n{who} just made a LEGENDARY donation to the family treasury! The whole family salutes you! 🙇🏆",
+      "# 💰 {gold} GOLD\n{who} just made the treasury cry tears of joy. We owe you one. A big one. 👑",
+      "🚨 Vault door won't close! {who} just donated **{gold} gold**! The family salutes you! 🙇💰",
+      "🤯 **{gold} gold**. From {who}. In one go. Somebody check on the accountant, Vinnie has fainted. 💰👑",
+      "## 👑 Patron of the family\n{who} donated **{gold} gold**. You'll never pay for a drink in this town again. 🥃",
+      "🏦 The bank called. They'd like to know who {who} is and why **{gold} gold** just moved. We said nothing. 🤐👑"
+    ],
+
+    eveHead: [
+      "⏰ **{time} left** to reach 100 activity today! (reset {reset})",
+      "⏳ Tick tock. **{time} left** until the reset ({reset}) and these names are still under 100:",
+      "📋 The boss is checking the list. **{time} left** (reset {reset}). Still under 100:",
+      "🍝 Nonna's asking about these ones. **{time} left** to hit 100 (reset {reset}):",
+      "### ⏰ {time} to go\nReset at {reset}. Roll call of the people who still owe the family a 100:",
+      "🕵️ We know where you live. And what your activity is. **{time} left** (reset {reset}):",
+      "🔔 Last orders in **{time}**! Reset at {reset}. Still thirsty for activity:",
+      "📞 This is your friendly reminder. Friendly, for now. **{time} left** until {reset}:",
+      "🚧 The door closes in **{time}** (reset {reset}). Get those 100 in:",
+      "> \"It's nothing personal, it's activity.\"\n**{time} left**, reset {reset}. Still under 100:"
+    ],
+    eveFew: [
+      "🎯 So close! Nearly everyone made it. **{time} left** (reset {reset}) and just these still need 100:",
+      "👀 The whole family is looking at you. **{time} left** (reset {reset}):",
+      "🏁 One last push and the whole family's at 100. **{time} left** (reset {reset}):",
+      "🕯️ It all comes down to this. **{time} left** (reset {reset}). No pressure. Lots of pressure:",
+      "🔦 The spotlight is on these last few. **{time} left** until {reset}:"
+    ],
+    eveTail: [
+      "Today's activity decides tomorrow's family bonus. Let's go! 💪",
+      "100 activity, or you explain it to Nonna. 🍝",
+      "Tomorrow's family bonus is on the line. Don't be that person. 😉",
+      "It's not much. It's just everything. Tomorrow's bonus depends on it. 💪",
+      "Do it for the family. Do it for the bonus. Do it so this bot stops naming you. 🤖",
+      "A little activity now, a bigger family bonus tomorrow. That's the deal. 🤝",
+      "Nobody's getting whacked over this. Probably. Just get the 100. 😇",
+      "Go on. It'll take less time than reading all of these reminders. ⏰"
+    ],
+    eveAll: [
+      "🎉 **Everyone has reached 100 activity today!** What a family! 💯",
+      "# 💯 EVERYONE\nThe whole family hit 100 today. No names to name. Nonna is crying. 🥹",
+      "🥂 Not one name on the list tonight. **Everyone made 100!** Drinks on the house. 🍾",
+      "🤖 I had a whole speech ready and nobody needs it. **Everyone's at 100!** I'm so proud. 💯",
+      "📋 The list is empty. The boss is smiling. That's scarier, but still: **everyone hit 100!** 🎩",
+      "🏆 **100/100 from the whole family today!** Other families are taking notes. 🗒️"
+    ],
+
+    boostOn: [
+      "🚀 **+{pct}% {name} boost** is active for the whole family until {until}! Time to grind! 💪",
+      "🍾 Fresh **+{pct}% {name} boost**, running until {until}. No excuses now! 🚀",
+      "### 🚀 +{pct}% {name}\nActive for everyone until {until}. The family paid for it, so go use it!",
+      "⛽ The tank is full: **+{pct}% {name} boost** until {until}. Floor it! 🏎️",
+      "🤌 Courtesy of the treasury: **+{pct}% {name}** for all of us until {until}. Don't waste it!",
+      "📣 Attention family! **+{pct}% {name} boost** is on until {until}. If you're reading this, you're late. 🏃",
+      "🍝 Double helpings! **+{pct}% {name} boost** until {until}. Grind now, sleep later. 😴"
+    ],
+
+    signHead: [
+      "📣 **War sign-up reminder**", "📣 **Who's in?** War sign-ups are open", "📋 **The list is looking short**", "🔔 **Roll call for the next war**",
+      "🚗 **There's still room in the car**", "🫵 **The family wants you**", "### 📣 War sign-ups: you know who you are"
+    ],
+    signTail: [
+      "Register on the Family tab in the game. Every fighter counts! 💪",
+      "Register on the Family tab. Takes one click, and you get to tell everyone you were there. 🎖️",
+      "Family tab, one button. We'll wait. Not for long. ⏰",
+      "Register on the Family tab. Nonna is watching. 👵",
+      "Family tab → Register. Empty seats don't win wars. 💺",
+      "Register on the Family tab before the bot starts using your full name. 😇"
+    ],
+
+    awardsHead: [
+      "🏅 **Monthly awards · {month}** 🏅", "# 🏅 Monthly awards · {month}", "🎭 **The Syndicate Oscars · {month}** 🏆", "🥇 **{month}: the family gives out the medals** 🥇",
+      "🍾 **{month} is done. Time to hand out the trophies.**", "📜 **The honors list · {month}** 🏅"
+    ],
+    awardsEnd: [
+      "Congrats everyone! 🥂", "Winners eat first. 🍝", "Next month, it could be you. Or it could be them again. 🥂", "No recounts. Vinnie has spoken. 🧾", "Speeches are limited to 10 seconds. 🎤", "Everyone else: there's always next month. 💪"
+    ]
+  };
+  var CARD_CHANCE = 0.3, CARD_COLORS = [0xee5d58, 0xffbf30, 0x4db2ff, 0x93d36d, 0xb06cff, 0xff7ac6, 0x2fd6c3];
+  // A line from LINES[key], with no recent repeats: about half the pool has to go by before a line can come back.
+  function say(key, vars) {
+    var pool = LINES[key], seen = {}, text;
+    try { seen = JSON.parse(localStorage.getItem("syn-lines")) || {}; } catch (e) {}
+    var recent = (seen[key] || []).filter(function (i) { return i < pool.length; }), open = pool.map(function (x, i) { return i; }).filter(function (i) { return recent.indexOf(i) < 0; });
+    var pick = open[Math.floor(Math.random() * open.length)];
+    seen[key] = recent.concat([pick]).slice(-Math.floor(pool.length / 2));
+    try { localStorage.setItem("syn-lines", JSON.stringify(seen)); } catch (e) {}
+    text = pool[pick];
+    Object.keys(vars || {}).forEach(function (k) { text = text.split("{" + k + "}").join(vars[k]); });
+    return text;
+  }
+  // A family chat post with a changing bot name and, some of the time, as a coloured card instead of plain text.
+  // Pings don't work inside a card, so the linked people are mentioned above it.
+  function dress(who, text, users) {
+    var msg = shout(text, users);
+    msg.as = say("as" + who);
+    if (Math.random() < CARD_CHANCE) {
+      msg.content = (users || []).map(function (u) { return "<@" + u + ">"; }).join(" ");
+      msg.embeds = [{ description: text.slice(0, 4000), color: CARD_COLORS[Math.floor(Math.random() * CARD_COLORS.length)] }];
+    }
+    return msg;
+  }
   // Posts are bundled per channel (webhook + bot name): everything that comes up while the channel is busy goes out as one
   // message once nothing new has arrived for a while, so opening the game in the morning doesn't flood Discord.
   // Catch-up posts (from the first 10 minutes after the game was opened) don't ping people by name; role pings
@@ -307,7 +591,7 @@ function reporter() {
   var STARTED = Date.now(), CATCHUP = 10 * 60 * 1000, QUIET_START = 60 * 1000, QUIET = 15 * 1000, MAX_HOLD = 5 * 60 * 1000;
   var queues = {};
   function post(url, payload, msgId, now) {
-    if (msgId || now) { return sendNow(url, payload, msgId); }
+    if (msgId || now) { return sendNow(url, msgId ? payload : bundle([payload], false)[0], msgId); }
     var key = url + "|" + (payload.username || ""), q = queues[key] = queues[key] || { url: url, items: [], first: Date.now(), timer: null };
     return new Promise(function (resolve, reject) {
       q.items.push({ payload: payload, resolve: resolve, reject: reject });
@@ -327,11 +611,13 @@ function reporter() {
   function bundle(list, catchUp) {
     var out = [], cur = null;
     list.forEach(function (p) {
-      var c = p.content || "", e = p.embeds || [], am = p.allowed_mentions || {}, size = JSON.stringify(e).length;
+      var c = catchUp && p.pingsOnly && !p.keepPings ? "" : p.content || "", e = p.embeds || [], am = p.allowed_mentions || {}, size = JSON.stringify(e).length; // no pings then, so no bare mentions
       if (!cur || cur.content.length + c.length + 2 > 2000 || cur.embeds.length + e.length > 10 || cur.size + size > 5500) {
-        cur = { username: p.username, content: "", embeds: [], size: 0, parse: [], roles: [], users: [] };
+        cur = { username: p.username, as: p.as, posts: 0, content: "", embeds: [], size: 0, parse: [], roles: [], users: [] };
         out.push(cur);
       }
+      cur.posts++;
+      if (p.pingsOnly) { c = c.split(" ").filter(function (x) { return cur.content.indexOf(x) < 0; }).join(" "); } // already mentioned in this message
       if (c) { cur.content += (cur.content ? "\n\n" : "") + c; }
       cur.embeds = cur.embeds.concat(e); cur.size += size;
       ["parse", "roles", "users"].forEach(function (k) {
@@ -340,7 +626,7 @@ function reporter() {
       });
     });
     return out.map(function (m) {
-      var msg = { username: m.username, allowed_mentions: { parse: m.parse, roles: m.roles, users: m.users.slice(0, 100) } };
+      var msg = { username: m.posts === 1 && m.as || m.username, allowed_mentions: { parse: m.parse, roles: m.roles, users: m.users.slice(0, 100) } };
       if (m.content) { msg.content = m.content.slice(0, 2000); }
       if (m.embeds.length) { msg.embeds = m.embeds; }
       return msg;
@@ -527,7 +813,6 @@ function reporter() {
   // s.lvSeen = {id: last level seen}. Starts quietly: levels reached before it was switched on aren't announced.
   var STEP = 10;
   var lvBusy = false, lvError = "", lvRetryAt = 0;
-  var CHEERS = ["Congrats! 🥂", "Well done! 👏", "Keep it up! 💪", "Respect! 🎩"];
   // Members linked to their Discord account (s.links = {member id: Discord user id}) get pinged by name;
   // their user id is added to `users`, the only accounts the message may ping.
   function who(s, m, users) {
@@ -536,7 +821,7 @@ function reporter() {
     return uid ? "<@" + uid + "> (**" + md(m.name) + "**)" : "**" + md(m.name) + "**";
   }
   function milestoneLine(s, m, lv, users) {
-    return "🎉 " + who(s, m, users) + " just reached **level " + lv + "**! " + CHEERS[lv / STEP % CHEERS.length];
+    return say(lv % 50 === 0 ? "levelBig" : lv <= 30 ? "levelLow" : lv <= 70 ? "levelMid" : "levelHigh", { who: who(s, m, users), lv: lv, next: lv + STEP });
   }
   function checkMilestones() {
     var s = load();
@@ -556,7 +841,7 @@ function reporter() {
     lvBusy = true;
     var users = [];
     var lines = ups.map(function (u) { return milestoneLine(s, u.m, u.lv, users); });
-    post(s.lvHook, { username: "Syndicate Activity", allowed_mentions: { parse: [], users: users }, content: lines.join("\n") }).then(function () { lvError = ""; }, function (e) {
+    post(s.lvHook, dress("Family", lines.join("\n\n"), users)).then(function () { lvError = ""; }, function (e) {
       // Put the old levels back so the same milestone is tried again later.
       var now = load(); ups.forEach(function (u) { if (now.lvSeen) { now.lvSeen[u.m.id] = before[u.m.id]; } }); save(now);
       lvError = String(e && e.message || e); lvRetryAt = Date.now() + RETRY;
@@ -567,18 +852,9 @@ function reporter() {
   // reaches 500 or 1,000 points in one game day, louder the higher it goes.
   // s.apHit = {day, ids: {id: highest mark announced that day}}. The very first run stays quiet about marks already reached.
   var AP_MARKS = [500, 1000];
-  var AP_SHOUTS = {
-    500: ["🔥 {who} hit **500 activity** today! On fire! 🔥",
-      "🔥 {who} just cracked **500 activity** today! Warming up nicely! 💪",
-      "🔥 **500 activity** for {who} today! Keep that engine running! 🚂"],
-    1000: ["🚨💥 **ABSOLUTE MADMAN ALERT** 💥🚨\n{who} just SMASHED **1,000 activity** today! 🔥🔥🔥 Somebody stop them! 🏆👑",
-      "💥💥💥 **1,000 ACTIVITY** 💥💥💥\n{who} is UNSTOPPABLE today! 🚀🔥 The family bows down! 👑🙇",
-      "⚡🔥 **ONE. THOUSAND. ACTIVITY.** 🔥⚡\n{who} is built different! 🦾🏆 Legend status unlocked! 👑"]
-  };
   var apBusy = false, apError = "", apRetryAt = 0;
   function activityLine(s, m, mark, users) {
-    var pool = AP_SHOUTS[mark];
-    return pool[Math.floor(Math.random() * pool.length)].replace("{who}", who(s, m, users));
+    return say("ap" + mark, { who: who(s, m, users) });
   }
   function checkActivity() {
     var s = load(), mid = dayStart(Date.now()), day = dayKey(mid);
@@ -598,7 +874,7 @@ function reporter() {
     var users = [];
     hits.sort(function (a, b) { return a.mark - b.mark; });
     var text = hits.map(function (h) { return activityLine(s, h.m, h.mark, users); }).join("\n\n");
-    post(s.lvHook, { username: "Syndicate Activity", allowed_mentions: { parse: [], users: users }, content: text.slice(0, 2000) }).then(function () { apError = ""; }, function (e) {
+    post(s.lvHook, dress("Family", text, users)).then(function () { apError = ""; }, function (e) {
       var now = load();
       if (now.apHit && now.apHit.day === day) { hits.forEach(function (h) { now.apHit.ids[h.m.id] = before[h.m.id]; }); save(now); }
       apError = String(e && e.message || e); apRetryAt = Date.now() + RETRY;
@@ -622,14 +898,6 @@ function reporter() {
   // (counted like "levels today" in the panel). Only the highest new mark is posted if both were passed since the last look.
   // s.lvRush = {day, ids: {id: highest mark announced that day}}. The very first run stays quiet about gains already made.
   var RUSH_MARKS = [3, 5];
-  var RUSH_SHOUTS = {
-    3: ["⚡ {who} gained **+{n} levels** today! Leveling machine! 🚀",
-      "📈 **+{n} levels** in one day for {who}! Climbing fast! 🧗",
-      "⚡ {who} is on a level rush: **+{n} today**! Who can keep up? 🏃💨"],
-    5: ["🚨💥 **LEVEL EXPLOSION** 💥🚨\n{who} just blasted through **+{n} LEVELS** today! 🚀🚀🚀 Somebody call the fire department! 🔥🧯",
-      "☄️🔥 **+{n} LEVELS IN ONE DAY!** 🔥☄️\n{who} is absolutely UNSTOPPABLE! 🦾⚡ The leaderboard is shaking! 📈💥",
-      "💥⚡ **{n} LEVELS. ONE DAY.** ⚡💥\n{who} has gone full beast mode! 🐉🔥 Bow down to the grind king! 👑🙇"]
-  };
   function checkLevelRush() {
     var s = load(), mid = dayStart(Date.now()), day = dayKey(mid), base = gainsToday(s);
     if (!s.lvHook || !last || !canPost("rush") || last.at < mid || !base) { return; }
@@ -645,11 +913,8 @@ function reporter() {
     if (changed) { save(s); } // saved before posting so a second game tab doesn't post it too
     if (!hits.length) { return; }
     var users = [];
-    var text = hits.map(function (h) {
-      var pool = RUSH_SHOUTS[h.mark];
-      return pool[Math.floor(Math.random() * pool.length)].replace("{who}", who(s, h.m, users)).replace("{n}", h.n);
-    }).join("\n\n");
-    postFor("rush", s.lvHook, shout(text, users), function () {
+    var text = hits.map(function (h) { return say("rush" + h.mark, { who: who(s, h.m, users), n: h.n }); }).join("\n\n");
+    postFor("rush", s.lvHook, dress("Family", text, users), function () {
       var now = load();
       if (now.lvRush && now.lvRush.day === day) { hits.forEach(function (h) { now.lvRush.ids[h.m.id] = before[h.m.id]; }); save(now); }
     });
@@ -658,13 +923,6 @@ function reporter() {
   // 100+ streaks: a shout-out in the family chat at 7, 14, 30, 60 and 100 days in a row at 100 points or more.
   // Checked once the finished day is in the history. s.streakSaid = {id: {start, k}}: the run (by its first day) and the highest mark posted.
   var STREAK_MARKS = [7, 14, 30, 60, 100];
-  var STREAK_SHOUTS = {
-    7: "🔥 {who} hit 100+ activity **7 days in a row**! Consistency king! 👑",
-    14: "🔥🔥 {who} — **14 days in a row** at 100+! Two weeks of pure grind! 💪",
-    30: "🔥🔥🔥 **30-DAY STREAK!** 🔥🔥🔥\n{who} hit 100+ every single day for a month! Absolute legend! 🏆👑",
-    60: "🌋🔥 **60 DAYS IN A ROW!** 🔥🌋\n{who} is a machine! Two months without missing a day! 🤖🏆",
-    100: "💯💯💯 **ONE HUNDRED DAYS IN A ROW** 💯💯💯\n{who} has entered the Hall of Fame! 🏛️👑🔥"
-  };
   function fullStreak(s, id, upTo) {
     var n = 0;
     for (var t = upTo - DAY; ; t -= DAY) {
@@ -686,8 +944,8 @@ function reporter() {
     if (!hits.length) { return; }
     save(s);
     var users = [];
-    var text = hits.map(function (h) { return STREAK_SHOUTS[h.k].replace("{who}", who(s, h.m, users)); }).join("\n\n");
-    postFor("streak", s.lvHook, shout(text, users), function () {
+    var text = hits.map(function (h) { return say("streak" + h.k, { who: who(s, h.m, users) }); }).join("\n\n");
+    postFor("streak", s.lvHook, dress("Family", text, users), function () {
       var now = load(); hits.forEach(function (h) { if (before[h.m.id]) { now.streakSaid[h.m.id] = before[h.m.id]; } else { delete now.streakSaid[h.m.id]; } }); save(now);
     });
   }
@@ -754,7 +1012,8 @@ function reporter() {
     if (s.famLv == null || lv < s.famLv) { s.famLv = lv; save(s); return; } // first look stays quiet
     if (lv === s.famLv) { return; }
     var was = s.famLv; s.famLv = lv; save(s);
-    postFor("famlv", s.lvHook, shout("🏰🎉 **" + md(last.fam.name || "The family") + "** just reached **family level " + lv + "**! 🎉🏰\nThanks to everyone grinding for it! 💪🔥"),
+    var eta = famEta(s, last.fam);
+    postFor("famlv", s.lvHook, dress("Family", say("famLevel", { fam: md(last.fam.name || "The family"), lv: lv }) + (eta ? "\n-# Next up: level " + (lv + 1) + " in about " + etaWords(eta.ms) : "")),
       function () { var now = load(); now.famLv = was; save(now); });
   }
 
@@ -788,13 +1047,13 @@ function reporter() {
       var list = rows.filter(function (r) { return r[key] >= min; }).sort(function (a, b) { return b[key] - a[key]; }).slice(0, count);
       return list.length ? list.map(function (r, i) { return (count > 1 ? medal(i) + " " : "") + who(s, r.m, users) + " — " + r[key].toLocaleString("en-US") + unit; }).join("\n") : "Nobody yet.";
     }
-    var text = "🏅 **" + (partial ? "Monthly awards so far · " : "Monthly awards · ") + monthLabel(from) + "** 🏅\n\n"
+    var text = (partial ? "🏅 **Monthly awards so far · " + monthLabel(from) + "** 🏅" : say("awardsHead", { month: monthLabel(from) })) + "\n\n"
       + "🏆 **Most active**\n" + top("total", 1, " AP", 3) + "\n\n"
       + "✅ **Most days at 100+**\n" + top("full", 1, " days", 1) + "\n\n"
       + "🔥 **Longest 100+ streak**\n" + top("best", 2, " days in a row", 1) + "\n\n"
       + "📈 **Most levels gained**\n" + top("levels", 1, " levels", 1) + "\n\n"
       + "🪙 **Top donor**\n" + top("gold", 1, " gold", 1) + "\n\n"
-      + "-# Based on " + recorded.length + " of " + keys.length + " days. Congrats everyone! 🥂";
+      + "-# Based on " + recorded.length + " of " + keys.length + " days. " + say("awardsEnd");
     return { text: text, users: users, days: recorded.length };
   }
   function sendAwards(manual) {
@@ -804,7 +1063,7 @@ function reporter() {
     var a = buildAwards(s, from, to, manual);
     if (!a) { if (manual) { alert("There's no saved activity for this month yet."); } return; }
     if (!manual) { s.monthSent = monthKey(from); save(s); if (a.days < AWARD_MIN_DAYS) { return; } }
-    postFor("month", s.lvHook, shout(a.text, a.users), manual ? null : function () { var now = load(); delete now.monthSent; save(now); });
+    postFor("month", s.lvHook, dress("Family", a.text, a.users), manual ? null : function () { var now = load(); delete now.monthSent; save(now); });
   }
   function monthKey(t) { return new Date(t).toISOString().slice(0, 7); }
   function autoMonthly() {
@@ -1028,7 +1287,7 @@ function reporter() {
     if (!lead || lead.today <= holder.ap) { return; }
     s.recordSaid = { day: day, id: lead.id, ap: lead.today }; save(s);
     var users = [];
-    postFor("record", s.lvHook, shout("👑 **NEW RECORD!** " + who(s, lead, users) + " just beat the best day ever with **" + lead.today.toLocaleString("en-US") + " AP** today! 🔥\n"
+    postFor("record", s.lvHook, dress("Family", say("record", { who: who(s, lead, users), ap: lead.today.toLocaleString("en-US") }) + "\n"
       + "-# Old record: " + md(holder.name) + " with " + holder.ap.toLocaleString("en-US") + " AP on " + shortDay(Date.parse(holder.day)), users),
       function () { var n = load(); delete n.recordSaid; save(n); });
   }
@@ -1876,13 +2135,13 @@ function reporter() {
     if (now < reset - EVENING_BEFORE || now > reset - EVENING_LAST || last.at < now - 10 * 60 * 1000) { return; }
     var under = members(last.fam).filter(function (m) { return m.today < FULL && !awayUntil(s, m.id); }).sort(function (a, b) { return b.today - a.today; });
     s.eveSaid = day; save(s);
-    var users = [], hours = Math.round((reset - now) / HOUR), t = Math.round(reset / 1000);
+    var users = [], hours = Math.round((reset - now) / HOUR), t = Math.round(reset / 1000), time = hours >= 1 ? hours + " hour" + (hours === 1 ? "" : "s") : "under 1 hour";
     var text = under.length
-      ? "⏰ **" + (hours >= 1 ? hours + " hour" + (hours === 1 ? "" : "s") : "Less than an hour") + " left** to reach 100 activity today! (reset <t:" + t + ":t>)\n"
+      ? say(under.length <= 3 ? "eveFew" : "eveHead", { time: time, reset: "<t:" + t + ":t>" }) + "\n"
         + under.map(function (m) { return "• " + who(s, m, users) + " — " + m.today + "/100"; }).join("\n")
-        + "\nToday's activity decides tomorrow's family bonus. Let's go! 💪"
-      : "🎉 **Everyone has reached 100 activity today!** What a family! 💯";
-    var msg = shout(text, users);
+        + "\n" + say("eveTail")
+      : say("eveAll");
+    var msg = dress("Family", text, users);
     msg.keepPings = true; // the evening reminder is about right now, so it pings even right after the game was opened
     postFor("evening", s.lvHook, msg, function () { var n = load(); delete n.eveSaid; save(n); });
   }
@@ -1953,7 +2212,7 @@ function reporter() {
       if (!b) { s.boosts[k] = { until: until, pct: pct, d24: until - now <= DAY, h1: until - now <= HOUR, ended: until <= now }; changed = true; return; }
       var t = Math.round(until / 1000);
       if (until !== b.until && until > now) {
-        if (until > b.until) { fam.push("🚀 **+" + pct + "% " + name + " boost** is active for the whole family until <t:" + t + ":f>! Time to grind! 💪"); }
+        if (until > b.until) { fam.push(say("boostOn", { pct: pct, name: name, until: "<t:" + t + ":f>" })); }
         s.boosts[k] = { until: until, pct: pct, d24: until - now <= DAY, h1: until - now <= HOUR, ended: false }; changed = true; return;
       }
       if (until > now) {
@@ -1966,7 +2225,7 @@ function reporter() {
     if (reminded) { var gl = renewGold(p, now); if (gl) { lead.push(gl); } }
     if (changed) { save(s); }
     if (lead.length && s.webhook) { postFor("boost", s.webhook, shout(lead.join("\n"))); }
-    if (fam.length && s.lvHook) { postFor("boostfam", s.lvHook, shout(fam.join("\n"))); }
+    if (fam.length && s.lvHook) { postFor("boostfam", s.lvHook, dress("Family", fam.join("\n\n"))); }
   }
   // Added to the "ends in a day / an hour" reminders: what renewing at +25% costs for every boost ending within a day,
   // against the family treasury, so there's time to collect donations if gold is missing.
@@ -2037,10 +2296,7 @@ function reporter() {
   // from the treasury ledger (the game's own query behind the Family tab's account page: {ledger: [{id, userId, userName, kind, amount}]}).
   // s.donSeen = highest ledger entry id handled; the first look stays quiet about older donations.
   var DON_MIN = 500, DON_EVERY = 5 * 60000, donAt = 0, donBusy = false;
-  var DON_SHOUTS = [
-    [10000, "👑💰 **{gold} GOLD** 💰👑\n{who} just made a LEGENDARY donation to the family treasury! The whole family salutes you! 🙇🏆"],
-    [2000, "💎 {who} donated **{gold} gold** to the family treasury! That's huge, thank you! 🙌🔥"],
-    [DON_MIN, "💰 {who} donated **{gold} gold** to the family treasury. Thank you! 🙏"]];
+  var DON_SHOUTS = [[10000, "don3"], [2000, "don2"], [DON_MIN, "don1"]];
   function checkDonations() {
     var s = load();
     if (!s.lvHook || !last || !client || donBusy || Date.now() - donAt < DON_EVERY || !canPost("donation")) { return; }
@@ -2065,10 +2321,9 @@ function reporter() {
       members(last.fam).forEach(function (m) { byId[m.id] = m; });
       var text = hits.map(function (e) {
         var m = byId[String(e.userId)] || { id: String(e.userId), name: e.userName || "Someone" }, gold = +e.amount;
-        var tpl = DON_SHOUTS.filter(function (x) { return gold >= x[0]; })[0][1];
-        return tpl.replace("{who}", who(s2, m, users)).replace("{gold}", gold.toLocaleString("en-US"));
+        return say(DON_SHOUTS.filter(function (x) { return gold >= x[0]; })[0][1], { who: who(s2, m, users), gold: gold.toLocaleString("en-US") });
       }).join("\n\n");
-      postFor("donation", s2.lvHook, shout(text, users), function () { var n = load(); n.donSeen = seen; save(n); });
+      postFor("donation", s2.lvHook, dress("Money", text, users), function () { var n = load(); n.donSeen = seen; save(n); });
     }).catch(function () {}).then(function () { donBusy = false; });
   }
 
@@ -3427,7 +3682,7 @@ function reporter() {
     });
     if (!total || !confirm("Ping " + users.length + " linked member" + (users.length === 1 ? "" : "s") + " in the family chat (" + total + " not registered)?")) { return; }
     remindBusy = true; redraw();
-    var msg = shout("📣 **War sign-up reminder**\n" + lines.join("\n") + "\nRegister on the Family tab in the game. Every fighter counts! 💪", users);
+    var msg = dress("Family", say("signHead") + "\n" + lines.join("\n") + "\n" + say("signTail"), users);
     post(s.lvHook, msg, null, true).then(function () { var n = load(); n.remindAt = Date.now(); save(n); }, function (e) { alert("Couldn't send: " + (e && e.message || e)); })
       .then(function () { remindBusy = false; redraw(); });
   }
@@ -3916,8 +4171,8 @@ function reporter() {
       var member = last && members(last.fam).filter(function (m) { return m.id === t.getAttribute("data-testlink"); })[0];
       if (!member || !s.lvHook) { return; }
       var pinged = [], line = milestoneLine(s, member, Math.max(STEP, Math.floor(member.level / STEP) * STEP), pinged);
-      sendNow(s.lvHook, { username: "Syndicate Activity", allowed_mentions: { parse: [], users: pinged },
-        content: "🧪 **Test** (not real, just showing what the posts look like):\n" + line + "\n\n" + activityLine(s, member, 500, pinged) + "\n\n" + activityLine(s, member, 1000, pinged) })
+      sendNow(s.lvHook, { username: say("asFamily"), allowed_mentions: { parse: [], users: pinged },
+        content: "🧪 **Test** (not real, just showing what the posts look like):\n" + line + "\n\n" + activityLine(s, member, 500, pinged) + "\n\n" + activityLine(s, member, 1000, pinged) + "\n\n" + say("rush3", { who: who(s, member, pinged), n: 3 }) })
         .then(function () { alert("Test sent. Check the family chat."); }, function (e) { alert("Couldn't send: " + (e && e.message || e)); });
       return;
     }
