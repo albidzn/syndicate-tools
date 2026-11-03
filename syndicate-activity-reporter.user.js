@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.16.6
+// @version      2.17.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.16.6";
+  var VERSION = "2.17.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.17.0": [
+      "Duels: new Your damage table. Your normal and crit hits against each class with your current gear, plus your crit chance and average per attack."
+    ],
     "2.16.6": [
       "Daily report: sending it again now repeats the same numbers, and no longer takes levels away from the next report."
     ],
@@ -2666,8 +2669,14 @@ function reporter() {
       var file = function (name) { var m = t.match(new RegExp("(?:^|[^\\w-])(" + name + "-[\\w-]+\\.js)")); if (!m) { throw new Error("the game's " + name + " file wasn't found (the game may have changed)"); } return dir + m[1]; };
       return Promise.all([import(file("computeFight")), import(file("Random")), import(file("duels"))]);
     }).then(function (got) {
-      var kit = { fight: null, Rnd: null, opponent: null, duel: null };
-      Object.keys(got[0]).forEach(function (k) { var f = got[0][k]; if (typeof f === "function" && /aggressors/.test(String(f)) && /targets/.test(String(f)) && /fight_result/.test(String(f))) { kit.fight = f; } });
+      var kit = { fight: null, Rnd: null, opponent: null, duel: null, damage: null, fighter: null, stats: null };
+      Object.keys(got[0]).forEach(function (k) {
+        var f = got[0][k], src = typeof f === "function" ? String(f) : "";
+        if (/aggressors/.test(src) && /targets/.test(src) && /fight_result/.test(src)) { kit.fight = f; }
+        if (/minDamage/.test(src) && /isDodged/.test(src)) { kit.damage = f; }
+        if (/thrownItemIds/.test(src)) { kit.fighter = f; }
+        if (/roundsLeft/.test(src)) { kit.stats = f; }
+      });
       Object.keys(got[1]).forEach(function (k) { var f = got[1][k]; if (typeof f === "function" && f.prototype && f.prototype.prob) { kit.Rnd = f; } });
       // Building a query's options sends nothing, so the opponent query can be told apart by its key.
       Object.keys(got[2]).forEach(function (k) {
@@ -2694,6 +2703,50 @@ function reporter() {
       } catch (e) {} // a fight past the game's turn limit doesn't count as a win
     }
     return wins / sims;
+  }
+  // What you deal to each class: the game's own damage code with the dice fixed, so weapon, gear, ammo, crew and food all count.
+  // The target is a stand-in at your level with no toughness or armor. Thrown items only count in a fight, so they aren't in here.
+  var DMG_CLASSES = [["tactician", 10], ["rogue", 25], ["bully", 50]], dmgLoading = false, dmgError = ""; // the class's damage reduction, in %
+  function damageRows(kit, me) {
+    var at = new Date(), mine = kit.fighter(me, at), st = kit.stats(mine), rows = DMG_CLASSES.map(function (c) {
+      var foe = kit.fighter({ id: 0, login: "", spec: c[0], xp: me.xp, attack: 0, endurance: 1, luck: 0, toughness: 0, combat: [], equipment: {}, food: [], gang: [] }, at), odds;
+      // The dice come in this order: does it hit, do they dodge, is it a crit.
+      var hit = function (crit, high) {
+        odds = [];
+        var r = kit.damage({ attacker: mine, defender: foe, using: mine.weapon, rnd: { prob: function (p) { odds.push(p); return odds.length === 1 || odds.length === 3 && crit; }, int: function (a, b) { return high ? b : a; } } });
+        if (r.isMiss || r.isDodged || r.isCrit !== crit) { throw new Error("the game's damage code wasn't recognised (the game may have changed)"); }
+        return r.damage;
+      };
+      var lo = hit(false, false), hi = hit(false, true), critLo = hit(true, false), critHi = hit(true, true);
+      // A landed shot can fire a second one for 10–20% of its damage.
+      var avg = odds[0] * (1 - odds[1]) * ((1 - odds[2]) * (lo + hi) / 2 + odds[2] * (critLo + critHi) / 2) * (1 + (st.doubleShotChanceBuffPerc || 0) * 0.15);
+      return { spec: c[0], cut: c[1], lo: lo, hi: hi, critLo: critLo, critHi: critHi, hit: odds[0], dodge: odds[1], crit: odds[2], avg: Math.round(avg) };
+    });
+    return { rows: rows, attack: Math.ceil(st.attack * (1 + (st.attackBuffPerc || 0))), min: mine.weapon.minDamage, max: mine.weapon.maxDamage, bonus: st.damageBuffPerc || 0, extra: st.doubleShotChanceBuffPerc || 0 };
+  }
+  function damageHtml() {
+    var me = duelMe(), h = "<div class='dqhead' style='margin-top:12px'><span class='t grow'>Your damage</span></div>", pct = function (v) { return +(v * 100).toFixed(1) + "%"; }, n = function (v) { return v.toLocaleString("en-US"); };
+    if (!me) { return h + "<div class='mqnote'>Your fighter hasn't loaded yet.</div>"; }
+    if (!duelKit && !dmgError) {
+      if (!dmgLoading) { dmgLoading = true; duelTools().then(redraw, function (e) { dmgError = String(e && e.message || e); redraw(); }); }
+      return h + "<div class='st wait'>Loading the game's damage code…</div>";
+    }
+    var d;
+    try {
+      if (dmgError) { throw new Error(dmgError); }
+      if (!duelKit.damage || !duelKit.fighter || !duelKit.stats) { throw new Error("the game's damage code wasn't recognised (the game may have changed)"); }
+      d = damageRows(duelKit, me);
+    } catch (e) { return h + "<div class='st bad'>Couldn't work it out: " + esc(e.message || e) + ".</div>"; }
+    var top = d.rows[0];
+    h += "<div class='dqfacts'>Attack <b>" + n(d.attack) + "</b> · Weapon <b>" + n(d.min) + "–" + n(d.max) + "</b> · Crit chance <b>" + pct(top.crit) + "</b> · Crit <b>×" + (top.critHi / top.hi).toFixed(2) + "</b>"
+      + (d.bonus ? " · Damage <b>+" + pct(d.bonus) + "</b>" : "") + (d.extra ? " · Extra shot <b>" + pct(d.extra) + "</b>" : "") + "</div>";
+    h += "<table class='dq'><thead><tr><th style='text-align:left'>Against</th><th>Normal</th><th>Crit</th><th title='Per attack, counting crits, misses and dodges'>Average</th></tr></thead><tbody>";
+    d.rows.forEach(function (r) {
+      h += "<tr><td class='nm2' style='text-align:left;white-space:nowrap' title='Takes " + r.cut + "% less damage'>" + specIcon(r.spec) + SPECS[r.spec] + " <span class='idle'>−" + r.cut + "%</span></td>"
+        + "<td style='white-space:nowrap'>" + n(r.lo) + "–" + n(r.hi) + "</td><td style='white-space:nowrap'>" + n(r.critLo) + "–" + n(r.critHi) + "</td>"
+        + "<td title='You hit " + pct(r.hit) + " of the time, then they dodge " + pct(r.dodge) + "' style='color:var(--fg);font-weight:600'>" + n(r.avg) + "</td></tr>";
+    });
+    return h + "</tbody></table><div class='mqnote'>With your current gear, against a player at your level with no toughness or armor. Toughness lowers your crit chance, armor lowers your damage, and players above your level take less. Items thrown during a fight aren't counted.</div>";
   }
   function runDuelScan() {
     if (duelState && duelState.running) { return; }
@@ -3158,7 +3211,7 @@ function reporter() {
       + (cd ? (myRank ? " · " : "") + (cd > now ? "Free attack in <b>" + leftText(cd - now) + "</b>" : "Free attack <b>ready</b>") : "") + "</div>";
     if (running) { h += "<div class='st wait'>" + esc(duelState.step) + "</div>" + (duelState.total ? "<div class='bar' style='margin:6px 0'><i style='width:" + Math.round(duelState.done / duelState.total * 100) + "%'></i></div>" : ""); }
     if (duelState && duelState.error) { h += "<div class='st bad'>Couldn't scan: " + esc(duelState.error) + ".</div>"; }
-    if (!scan) { return h + (running ? "" : "<div class='mqnote'>Press Scan to rate the players around your rank. It loads them one by one, about a second each, and starts no fights.</div>") + learnHtml(s); }
+    if (!scan) { return h + (running ? "" : "<div class='mqnote'>Press Scan to rate the players around your rank. It loads them one by one, about a second each, and starts no fights.</div>") + damageHtml() + learnHtml(s); }
     var cap = duelCap(me), used = {};
     scan.rows.forEach(function (r) { used[r.id] = attacksToday(s, r.id); });
     var count = function (min) { return scan.rows.filter(function (r) { return r.win >= min && (!min || used[r.id] < cap); }).length; }, capped = scan.rows.filter(function (r) { return used[r.id] >= cap; }).length;
@@ -3191,7 +3244,7 @@ function reporter() {
     }
     var age = Math.max(0, Math.round((now - scan.at) / 60000));
     if (capped && duelFilter) { h += "<div class='mqnote'>" + capped + " player" + (capped === 1 ? "" : "s") + " hidden: already attacked " + cap + " times today. See All.</div>"; }
-    return h + adviceHtml(s) + learnHtml(s) + "<div class='mqnote'>Scanned " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + (scan.partial ? ", some players couldn't be loaded" : "") + ". Win % is " + DUEL_SIMS + " simulated fights with the game's own formula, using your consumables. A real fight can still go either way.</div>";
+    return h + damageHtml() + adviceHtml(s) + learnHtml(s) + "<div class='mqnote'>Scanned " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + (scan.partial ? ", some players couldn't be loaded" : "") + ". Win % is " + DUEL_SIMS + " simulated fights with the game's own formula, using your consumables. A real fight can still go either way.</div>";
   }
 
   // Away (vacation): s.away = {id: start of the last away game day}. Set per PC from the 🏖️ button; expired entries are ignored.
