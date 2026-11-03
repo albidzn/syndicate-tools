@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.19.2
+// @version      2.19.3
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,13 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.19.2";
+  var VERSION = "2.19.3";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.19.3": [
+      "Honor rank posts are now only for big moments: a new family #1, someone passing 3 or more members at once, or a first time in the game's top 100, 50, 25, 10 or 3. Besides a new #1, at most 3 a day.",
+      "Discord settings has a button to switch them off."
+    ],
     "2.19.2": [
       "Wide game dialogs, like Travel, now fit beside the docked panel instead of sliding under it."
     ],
@@ -490,6 +494,14 @@ function reporter() {
       "> \"Wasn't {them} ahead of you?\"\n> \"Was,\" said {who}. **#{rank}** in honor.",
       "🏃💨 {who} passed {them} like they were standing still. Honor rank **#{rank}**.",
       "🍿 This is getting good: {who} passed {them}. Honor rank **#{rank}**. Revenge when?"
+    ],
+    honorTier: [
+      "🏅 {who} just broke into the **top {tier}** of the whole game: honor rank **#{rank}**!",
+      "📈 **Top {tier} in the whole game.** {who} just got there: honor rank **#{rank}**. 🔥",
+      "## 🏅 Top {tier}\n{who} is now **#{rank}** in the whole game. The other families have noticed.",
+      "🗞️ **THE DAILY RACKET:** {who} enters the game's top {tier}, now **#{rank}**. The family denies everything.",
+      "🎩 Make room at the top {tier}: {who} has arrived at **#{rank}**.",
+      "🍾 {who} reached the **top {tier}** of the whole game (**#{rank}**). Drinks on the family!"
     ],
     overtakeTop: [
       "# 👑 NEW FAMILY #1\n{who} just passed {them} and now has the family's best honor rank: **#{rank}**.",
@@ -1328,10 +1340,11 @@ function reporter() {
       + "-# Old record: " + md(holder.name) + " with " + holder.ap.toLocaleString("en-US") + " AP on " + shortDay(Date.parse(holder.day)), users),
       function () { var n = load(); delete n.recordSaid; save(n); });
   }
-  // Honor overtakes: a line in the family chat when a member passes another in the game's player ranking. Names show without
-  // a ping, since this can happen often. Each pair counts once per direction per day, a passer is named once with whoever else
-  // they passed in small print, and there are at most 3 at a time and 6 a day. s.rankSeen = {id: place}; s.overSaid = {day, n, pairs}.
-  var OVER_POSTS = 3, OVER_DAY = 6;
+  // Honor rank news in the family chat, only for the big moments: a new family #1, someone passing 3 or more members at once, and a
+  // member's first time in the game's top 100, 50, 25, 10 or 3. Names show without a ping. Each pair counts once per direction per
+  // day, and besides a new #1 there are at most 2 at a time and 3 a day. s.overtakes === false switches it off (Discord settings); the ranks are still
+  // followed then, so switching it on doesn't post old news. s.rankSeen = {id: place}; s.overTier = {id: best tier}; s.overSaid = {day, n, pairs}.
+  var OVER_POSTS = 2, OVER_DAY = 3, OVER_JUMP = 3, OVER_TIERS = [100, 50, 25, 10, 3];
   function checkOvertakes() {
     var s = load(), day = dayKey(Date.now());
     if (!s.lvHook || !last || !canPost("overtake")) { return; }
@@ -1339,29 +1352,38 @@ function reporter() {
     list.forEach(function (m) { now[m.id] = m.pos; if (!seen || seen[m.id] !== m.pos) { changed = true; } });
     if (!changed) { return; }
     s.rankSeen = now;
-    if (!seen) { save(s); return; } // first look stays quiet
+    var tierWas = s.overTier, tiers = s.overTier = Object.assign({}, tierWas), newTier = {};
+    list.forEach(function (m) {
+      var t = OVER_TIERS.filter(function (x) { return m.pos <= x; }).pop();
+      if (!t || tiers[m.id] && tiers[m.id] <= t) { return; }
+      if (tierWas && seen && seen[m.id]) { newTier[m.id] = t; } // the first look, and new members, start quietly
+      tiers[m.id] = t;
+    });
+    if (!seen || s.overtakes === false) { save(s); return; }
     var was = s.overSaid, said = was && was.day === day ? was : { day: day, n: 0, pairs: {} }, best = Math.min.apply(null, list.map(function (m) { return seen[m.id] || Infinity; }));
     var bestNow = Math.min.apply(null, list.map(function (m) { return m.pos; })), hits = [];
     list.forEach(function (a) {
-      if (!seen[a.id]) { return; } // new members start quietly
-      var passed = list.filter(function (b) { return b.id !== a.id && seen[b.id] && seen[a.id] > seen[b.id] && a.pos < b.pos && !said.pairs[a.id + "|" + b.id]; });
-      if (!passed.length) { return; }
+      var passed = !seen[a.id] ? [] : list.filter(function (b) { return b.id !== a.id && seen[b.id] && seen[a.id] > seen[b.id] && a.pos < b.pos && !said.pairs[a.id + "|" + b.id]; });
+      var top = a.pos === bestNow && passed.some(function (b) { return seen[b.id] === best; }), tier = newTier[a.id];
+      if (!top && !tier && passed.length < OVER_JUMP) { return; }
       passed.forEach(function (b) { said.pairs[a.id + "|" + b.id] = 1; });
       passed.sort(function (x, y) { return x.pos - y.pos; });
-      hits.push({ m: a, passed: passed, top: a.pos === bestNow && passed.some(function (b) { return seen[b.id] === best; }) });
+      hits.push({ m: a, passed: passed, top: top, tier: tier, jump: passed.length >= OVER_JUMP });
     });
-    hits.sort(function (x, y) { return y.top - x.top || y.passed.length - x.passed.length; });
-    hits = hits.slice(0, Math.max(0, Math.min(OVER_POSTS, OVER_DAY - said.n)));
-    said.n += hits.length; s.overSaid = said;
+    hits.sort(function (x, y) { return y.top - x.top || (x.tier || 1e9) - (y.tier || 1e9) || y.passed.length - x.passed.length; });
+    var others = hits.filter(function (h) { return !h.top; }).slice(0, Math.max(0, Math.min(OVER_POSTS, OVER_DAY - said.n)));
+    hits = hits.filter(function (h) { return h.top; }).concat(others);
+    said.n += others.length; s.overSaid = said;
     save(s); // saved before posting so a second game tab doesn't post it too
     if (!hits.length) { return; }
     var text = hits.map(function (h) {
+      if (!h.top && !h.jump) { return say("honorTier", { who: who(s, h.m, []), tier: h.tier, rank: h.m.pos }); }
       var first = h.top ? h.passed.filter(function (b) { return seen[b.id] === best; })[0] : h.passed[0], rest = h.passed.filter(function (b) { return b !== first; });
       return say(h.top ? "overtakeTop" : "overtake", { who: who(s, h.m, []), them: who(s, first, []), rank: h.m.pos })
         + (rest.length ? "\n-# Also passed: " + rest.map(function (b) { return md(b.name); }).join(", ") : "");
     }).join("\n\n");
     postFor("overtake", s.lvHook, dress("Family", text), function () {
-      var n = load(); n.rankSeen = seen; if (was) { n.overSaid = was; } else { delete n.overSaid; } save(n);
+      var n = load(); n.rankSeen = seen; if (tierWas) { n.overTier = tierWas; } else { delete n.overTier; } if (was) { n.overSaid = was; } else { delete n.overSaid; } save(n);
     });
   }
   function buildBoard(s, fam) {
@@ -3990,7 +4012,7 @@ function reporter() {
       + (lvError ? "<div class='st bad'>Couldn't post a level milestone: " + esc(lvError) + ". Trying again in a few minutes.</div>" : "")
       + (apError ? "<div class='st bad'>Couldn't post an activity shout-out: " + esc(apError) + ". Trying again in a few minutes.</div>" : "")
       + Object.keys(fails).map(function (k) {
-        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", autoattack: "an auto-attack note", gamecheck: "the game update alarm", overtake: "an honor overtake", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
+        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", autoattack: "an auto-attack note", gamecheck: "the game update alarm", overtake: "an honor rank post", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
           + ": " + esc(fails[k]) + ". Trying again in a few minutes.</div>";
       }).join("")
       + (s.webhook && s.gameCheck && Object.keys(s.gameCheck.broken || {}).length ? "<div class='st bad'>🚨 Not working since a game update: " + esc(Object.keys(s.gameCheck.broken).join(", ")) + ".</div>" : "")
@@ -4009,7 +4031,8 @@ function reporter() {
         + hookBlock("board", "Leaderboard (one message, kept up to date, with family level)", s.boardHook, "")
         + hookBlock("level", "Family chat: level milestones, 500 / 1,000 shout-outs, 100+ streaks, donations of 500+ gold, family level-ups, monthly awards", s.lvHook,
           (last ? "<button type='button' data-links>Link members to Discord (" + members(last.fam).filter(function (m) { return s.links && s.links[m.id]; }).length + "/" + last.fam.members.length + ")</button>" : "")
-          + (s.lvHook && last ? "<button type='button' data-awards>Send awards so far</button>" : ""))
+          + (s.lvHook && last ? "<button type='button' data-awards>Send awards so far</button>" : "")
+          + (s.lvHook ? "<button type='button' data-overtoggle title='A new family #1, someone passing 3 or more members at once, or a first time in the top 100, 50, 25, 10 or 3 of the whole game. Without pings, and besides a new #1 at most 3 a day.'>Honor rank posts: " + (s.overtakes === false ? "off" : "on") + "</button>" : ""))
         + (showLinks && last ? linkBlock(s) : "")
         + hookBlock("war", "War alerts", s.warHook, "")
         + (s.warHook ? "<div style='margin-top:10px'><b>Role to ping</b> on new wars and reminders (leave empty for no ping)"
@@ -4323,6 +4346,7 @@ function reporter() {
     }
     if (t.hasAttribute("data-rinv")) { var ri = recruitFilter(s); ri.inv = t.getAttribute("data-rinv"); s.recruitFilter = ri; save(s); redraw(); return; }
     if (t.hasAttribute("data-rsort")) { var rs = recruitFilter(s); rs.sort = t.getAttribute("data-rsort"); s.recruitFilter = rs; save(s); redraw(); return; }
+    if (t.hasAttribute("data-overtoggle")) { s.overtakes = s.overtakes === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-ratoggle")) { s.recruitAlert = s.recruitAlert === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-rscan")) { runRecruitScan(); return; }
     if (t.hasAttribute("data-spec")) {
