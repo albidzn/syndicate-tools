@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.18.0
+// @version      2.19.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,13 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.18.0";
+  var VERSION = "2.19.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.19.0": [
+      "Game update alarm: after a game update the tools are checked, and this chat hears about any that stopped working, and when they work again.",
+      "Family chat: a post when a member passes another on the honor rank, with a bigger one for a new family #1."
+    ],
     "2.18.0": [
       "Family chat posts: far more wording for level-ups, activity, streaks, donations and reminders, some of it silly. Recent lines don't repeat.",
       "Family chat posts now also change their bot name and sometimes show as a coloured card or with big text. Leadership and war room posts stay as they were.",
@@ -461,6 +465,33 @@ function reporter() {
       "## 🗿 All-time best: {ap} AP\nCongratulations to {who}, and our condolences to the old record.",
       "⚰️ Here lies the old record. Killed today by {who} with **{ap} AP**. It didn't see it coming.",
       "🥇 {who} just did what no one here has done: **{ap} AP** in one day! New family record! 🔥"
+    ],
+
+    overtake: [
+      "📈 {who} just passed {them} on the honor rank! Now **#{rank}**.",
+      "👋 {who} waved at {them} on the way past. Honor rank **#{rank}**.",
+      "🏎️ Overtake! {who} just went around {them} on the outside. Honor rank **#{rank}**.",
+      "🪞 {them}, check your mirrors. {who} just went past: honor rank **#{rank}**.",
+      "📉 Bad news for {them}. Good news for {who}: honor rank **#{rank}**.",
+      "🗞️ **THE DAILY RACKET:** {who} passes {them} in the honor ranks. Now **#{rank}**.",
+      "👀 {them} blinked. {who} is ahead now: honor rank **#{rank}**.",
+      "🎩 With respect, {them}: {who} is above you now. Honor rank **#{rank}**.",
+      "🪜 {who} just climbed over {them} on the honor ladder: **#{rank}**.",
+      "⚔️ Family rivalry update: {who} ahead of {them}, honor rank **#{rank}**. Your move.",
+      "🥊 {who} just knocked {them} down a spot. Honor rank **#{rank}**.",
+      "📞 Someone call {them}. {who} just went past: honor rank **#{rank}**.",
+      "🧾 The books have changed: {who} now outranks {them} at **#{rank}**.",
+      "> \"Wasn't {them} ahead of you?\"\n> \"Was,\" said {who}. **#{rank}** in honor.",
+      "🏃💨 {who} passed {them} like they were standing still. Honor rank **#{rank}**.",
+      "🍿 This is getting good: {who} passed {them}. Honor rank **#{rank}**. Revenge when?"
+    ],
+    overtakeTop: [
+      "# 👑 NEW FAMILY #1\n{who} just passed {them} and now has the family's best honor rank: **#{rank}**.",
+      "👑 The throne has a new owner. {who} passed {them} for **#1 in the family** (honor rank **#{rank}**).",
+      "🏆 {who} has the family's best honor rank now, past {them}: **#{rank}**. Kiss the ring. 💍",
+      "🪑 {them}, please leave the big chair. {who} is top of the family now: honor rank **#{rank}**.",
+      "## 👑 Regime change\n{who} passed {them} for the top spot in the family. Honor rank **#{rank}**.",
+      "🚨 Coup alert! {who} has taken the family's best honor rank from {them}: **#{rank}**."
     ],
 
     don1: [
@@ -1291,6 +1322,42 @@ function reporter() {
       + "-# Old record: " + md(holder.name) + " with " + holder.ap.toLocaleString("en-US") + " AP on " + shortDay(Date.parse(holder.day)), users),
       function () { var n = load(); delete n.recordSaid; save(n); });
   }
+  // Honor overtakes: a line in the family chat when a member passes another in the game's player ranking. Names show without
+  // a ping, since this can happen often. Each pair counts once per direction per day, a passer is named once with whoever else
+  // they passed in small print, and there are at most 3 at a time and 6 a day. s.rankSeen = {id: place}; s.overSaid = {day, n, pairs}.
+  var OVER_POSTS = 3, OVER_DAY = 6;
+  function checkOvertakes() {
+    var s = load(), day = dayKey(Date.now());
+    if (!s.lvHook || !last || !canPost("overtake")) { return; }
+    var list = members(last.fam).filter(function (m) { return m.pos > 0; }), now = {}, seen = s.rankSeen, changed = !seen;
+    list.forEach(function (m) { now[m.id] = m.pos; if (!seen || seen[m.id] !== m.pos) { changed = true; } });
+    if (!changed) { return; }
+    s.rankSeen = now;
+    if (!seen) { save(s); return; } // first look stays quiet
+    var was = s.overSaid, said = was && was.day === day ? was : { day: day, n: 0, pairs: {} }, best = Math.min.apply(null, list.map(function (m) { return seen[m.id] || Infinity; }));
+    var bestNow = Math.min.apply(null, list.map(function (m) { return m.pos; })), hits = [];
+    list.forEach(function (a) {
+      if (!seen[a.id]) { return; } // new members start quietly
+      var passed = list.filter(function (b) { return b.id !== a.id && seen[b.id] && seen[a.id] > seen[b.id] && a.pos < b.pos && !said.pairs[a.id + "|" + b.id]; });
+      if (!passed.length) { return; }
+      passed.forEach(function (b) { said.pairs[a.id + "|" + b.id] = 1; });
+      passed.sort(function (x, y) { return x.pos - y.pos; });
+      hits.push({ m: a, passed: passed, top: a.pos === bestNow && passed.some(function (b) { return seen[b.id] === best; }) });
+    });
+    hits.sort(function (x, y) { return y.top - x.top || y.passed.length - x.passed.length; });
+    hits = hits.slice(0, Math.max(0, Math.min(OVER_POSTS, OVER_DAY - said.n)));
+    said.n += hits.length; s.overSaid = said;
+    save(s); // saved before posting so a second game tab doesn't post it too
+    if (!hits.length) { return; }
+    var text = hits.map(function (h) {
+      var first = h.top ? h.passed.filter(function (b) { return seen[b.id] === best; })[0] : h.passed[0], rest = h.passed.filter(function (b) { return b !== first; });
+      return say(h.top ? "overtakeTop" : "overtake", { who: who(s, h.m, []), them: who(s, first, []), rank: h.m.pos })
+        + (rest.length ? "\n-# Also passed: " + rest.map(function (b) { return md(b.name); }).join(", ") : "");
+    }).join("\n\n");
+    postFor("overtake", s.lvHook, dress("Family", text), function () {
+      var n = load(); n.rankSeen = seen; if (was) { n.overSaid = was; } else { delete n.overSaid; } save(n);
+    });
+  }
   function buildBoard(s, fam) {
     var list = members(fam), mid = dayStart(Date.now()), ws = weekStart(mid);
     list.forEach(function (m) {
@@ -1574,11 +1641,11 @@ function reporter() {
   // Loading other families and war replays goes through the game's own queries (the options factories exported by its
   // family-*.js module, found by their source), so the requests are exactly what the game sends when you click around.
   // famQueries = {family: (params) => options, war: (warId) => options, account: (familyId) => options (treasury ledger)}
-  var famQueries = null, famQueriesLoading = null;
+  var famQueries = null, famQueriesLoading = null, famUrls = [];
   function familyQueries() {
     if (famQueries && famQueries.family && famQueries.war && famQueries.account) { return Promise.resolve(famQueries); }
     if (famQueriesLoading) { return famQueriesLoading; }
-    var urls = [], found = { family: null, war: null, account: null };
+    var urls = famUrls.slice(), found = { family: null, war: null, account: null };
     performance.getEntriesByType("resource").forEach(function (e) { if (/\/assets\/family-[\w-]+\.js(\?|$)/.test(e.name) && urls.indexOf(e.name) < 0) { urls.push(e.name); } });
     famQueriesLoading = urls.reduce(function (p, u) {
       return p.then(function () {
@@ -1784,6 +1851,104 @@ function reporter() {
       try { sessionStorage.setItem("syn-reload", String(Date.now())); } catch (e) {}
       location.reload();
     }).catch(function () { reloading = false; });
+  }
+
+  // Game update alarm, on the PC with the leadership chat: when the game's files change (and once a day), each tool's way into the
+  // game is tried, without starting anything. A tool that fails twice, 5 minutes apart, gets one post in the leadership chat, and
+  // another when it works again. No answer from the game isn't a failure: that's tried again in 30 minutes.
+  // s.gameCheck = {build, at, broken: {tool: reason}, pending: {tool: reason}, retryAt}.
+  var GAME_CHECK_WAIT = 60000, GAME_CHECK_DAY = DAY, GAME_CHECK_AGAIN = 5 * 60000, GAME_CHECK_NET = 30 * 60000, gameChecking = false;
+  var NO_ANSWER = /Failed to fetch|dynamically imported|NetworkError|Load failed|importing a module|no answer from the game/i;
+  function gameIndex() { return performance.getEntriesByType("resource").map(function (e) { return e.name; }).filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0] || ""; }
+  function gameProbes() {
+    var loaded = null;
+    function family() { // the family's files and data, the way the Family tab gets them
+      if (loaded) { return loaded; }
+      var idx = gameIndex(), failed = false;
+      if (!idx) { throw new Error("the game's files weren't found"); }
+      loaded = fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
+        (t.match(/family-[\w-]+\.js/g) || []).forEach(function (n) { var u = idx.replace(/index-[\w-]+\.js.*$/, n); if (famUrls.indexOf(u) < 0) { famUrls.push(u); } });
+        return Promise.all(famUrls.map(function (u) { return import(u).catch(function () { failed = true; }); })); // one of them not loading only matters if something's then missing
+      }).then(familyQueries).then(function (q) {
+        if (failed && !(q.family && q.war && q.account)) { throw new Error("no answer from the game"); }
+        if (last) { return { q: q, fam: last.fam }; }
+        if (!client) { findClient(); }
+        if (!client) { throw new Error("the game's data can't be reached"); }
+        if (!q.family) { return { q: q, fam: null }; }
+        return client.fetchQuery(q.family()).then(function (d) { return { q: q, fam: d && (Array.isArray(d.members) ? d : d.family) }; }, function () { throw new Error("no answer from the game"); });
+      });
+      return loaded;
+    }
+    function fights(kit, me) { // a few real fights against yourself, since the win chances hide a fight that fails
+      var at = new Date(), foe = Object.assign({}, me, { id: "syn-check" }), error = null;
+      for (var i = 0; i < 5; i++) {
+        try {
+          var ev = kit.fight({ aggressors: [me], targets: [foe], rnd: new kit.Rnd(i + 1), useConsumables: true, at: at, maxTurnsPerRound: 1000 }), end = ev[ev.length - 1];
+          if (end && Array.isArray(end.winners)) { return; }
+          error = new Error("the game's fight results have changed");
+        } catch (e) { error = e; }
+      }
+      throw new Error("the game's fight code failed: " + (error.message || error));
+    }
+    return [
+      ["Family data and reports", function () { return family().then(function (o) {
+        if (!o.q.family) { throw new Error("the family request wasn't found"); }
+        if (!o.fam || !Array.isArray(o.fam.members) || !o.fam.members.some(function (m) { return m && "today" in m && "yesterday" in m; }) || !members(o.fam).some(function (m) { return m.level > 0; })) { throw new Error("the member list has changed"); }
+      }); }],
+      ["Honor ranks", function () { return family().then(function (o) { if (o.fam && Array.isArray(o.fam.members) && !members(o.fam).some(function (m) { return m.pos > 0; })) { throw new Error("the members' honor rank is missing"); } }); }],
+      ["War alerts and debriefs", function () { return family().then(function (o) {
+        if (!o.q.war) { throw new Error("the war request wasn't found"); }
+        if (o.fam && (!o.fam.private || !Array.isArray(o.fam.private.wars))) { throw new Error("the family's war list is missing"); }
+      }); }],
+      ["Donation thank-yous", function () { return family().then(function (o) { if (!o.q.account) { throw new Error("the treasury request wasn't found"); } }); }],
+      ["Invites, boosts and auto-attack", function () { return familyCommand(); }],
+      ["Recruit and duel scans", function () { return playerRanking(); }],
+      ["Duel win chances", function () { return duelTools().then(function (kit) { var me = duelMe(); if (me) { fights(kit, me); } }); }],
+      ["Your damage", function () { return duelTools().then(function (kit) {
+        if (!kit.damage || !kit.fighter || !kit.stats) { throw new Error("the game's damage code wasn't recognised"); }
+        var me = duelMe(); if (me) { damageRows(kit, me); }
+      }); }],
+      ["Learn from mail", function () { return Promise.all([duelTools(), mailboxFn()]).then(function (got) { if (!got[0].duel) { throw new Error("the game's fight records weren't recognised"); } }); }],
+      ["Gang war", function () { return gangTools(); }]
+    ];
+  }
+  function runGameChecks() {
+    var out = { broken: {}, unsure: [] };
+    return gameProbes().reduce(function (p, t) {
+      return p.then(function () { return t[1](); }).then(null, function (e) {
+        var why = String(e && e.message || e);
+        if (NO_ANSWER.test(why)) { out.unsure.push(t[0]); } else { out.broken[t[0]] = why.replace(/ \(the game may have changed\)/, ""); }
+      });
+    }, Promise.resolve()).then(function () { return out; });
+  }
+  function checkGameUpdate() {
+    var s = load(), now = Date.now(), g = s.gameCheck || {};
+    if (!s.webhook || gameChecking || !canPost("gamecheck") || now - STARTED < GAME_CHECK_WAIT || !navigator.onLine || !/^\/game(\/|$)/.test(location.pathname)) { return; }
+    var build = gameIndex().replace(/^.*\/|\?.*$/g, "");
+    if (g.retryAt ? now < g.retryAt : g.build === build && now - g.at < GAME_CHECK_DAY) { return; }
+    gameChecking = true;
+    g.build = build; g.at = now; delete g.retryAt; s.gameCheck = g; save(s); // saved first, so a second game tab leaves it
+    runGameChecks().then(function (res) {
+      var n = load(), c = n.gameCheck, was = c.broken || {}, pend = c.pending || {}, broken = {}, pending = {}, news = [], fixed = [];
+      Object.keys(res.broken).forEach(function (t) {
+        if (was[t] || pend[t]) { broken[t] = res.broken[t]; if (!was[t]) { news.push(t); } } else { pending[t] = res.broken[t]; }
+      });
+      res.unsure.forEach(function (t) { if (was[t]) { broken[t] = was[t]; } });
+      Object.keys(was).forEach(function (t) { if (!broken[t]) { fixed.push(t); } });
+      c.broken = broken; c.pending = pending;
+      if (Object.keys(pending).length) { c.retryAt = Date.now() + GAME_CHECK_AGAIN; } else if (res.unsure.length) { c.retryAt = Date.now() + GAME_CHECK_NET; }
+      save(n);
+      if (!news.length && !fixed.length) { return; }
+      var lines = [];
+      if (news.length) { lines.push("🚨 **A game update broke part of the tools**"); news.forEach(function (t) { lines.push("• **" + t + "**: " + broken[t]); }); lines.push("The rest keeps working. These need a script update."); }
+      if (fixed.length) { lines.push("✅ **Working again:** " + fixed.join(", ") + "."); }
+      postFor("gamecheck", n.webhook, shout(lines.join("\n")), function () { // Discord refused: post it next time
+        var b = load(), bc = b.gameCheck;
+        news.forEach(function (t) { bc.pending[t] = bc.broken[t]; delete bc.broken[t]; });
+        fixed.forEach(function (t) { bc.broken[t] = was[t]; });
+        bc.retryAt = Date.now() + GAME_CHECK_AGAIN; save(b);
+      });
+    }).catch(function () {}).then(function () { gameChecking = false; redraw(); });
   }
 
   // Offline report: a heartbeat in its own key (the main one is large) every minute from any game tab. A gap of an hour or
@@ -3817,9 +3982,10 @@ function reporter() {
       + (lvError ? "<div class='st bad'>Couldn't post a level milestone: " + esc(lvError) + ". Trying again in a few minutes.</div>" : "")
       + (apError ? "<div class='st bad'>Couldn't post an activity shout-out: " + esc(apError) + ". Trying again in a few minutes.</div>" : "")
       + Object.keys(fails).map(function (k) {
-        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", autoattack: "an auto-attack note", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
+        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", autoattack: "an auto-attack note", gamecheck: "the game update alarm", overtake: "an honor overtake", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
           + ": " + esc(fails[k]) + ". Trying again in a few minutes.</div>";
       }).join("")
+      + (s.webhook && s.gameCheck && Object.keys(s.gameCheck.broken || {}).length ? "<div class='st bad'>🚨 Not working since a game update: " + esc(Object.keys(s.gameCheck.broken).join(", ")) + ".</div>" : "")
       + (s.boardHook ? "<div class='st " + (boardError ? "bad" : "ok") + "'>" + (boardError ? "Couldn't update the leaderboard: " + esc(boardError) + "."
         : "🏆 Leaderboard " + (s.boardAt ? "updated " + clock(s.boardAt) : "goes up in a moment") + ".") + "</div>" : "")
       + "<div class='row'>"
@@ -3829,6 +3995,7 @@ function reporter() {
       html += "<div class='setup'>Only one leader needs these. Each Discord channel gets its own webhook: open the channel's settings (gear icon) → <b>Integrations</b> → <b>Webhooks</b> → <b>New Webhook</b> → <b>Copy Webhook URL</b>, and paste it below."
         + "<div class='row'><button type='button' data-backup>Download backup</button><button type='button' data-restore>Restore backup</button></div>"
         + backupHtml(s)
+        + (s.webhook && s.gameCheck ? "<div style='font-size:11.5px;color:var(--muted);margin-top:4px'>🔧 Game update check, " + clock(s.gameCheck.at) + ": " + (Object.keys(s.gameCheck.broken || {}).length ? "some tools aren't working, see above." : "all tools found.") + "</div>" : "")
         + "<div style='font-size:11.5px;color:var(--muted);margin-top:4px'>The backup holds the webhooks, Discord links and history. Keep it private: anyone with it can post in your channels.</div>"
         + hookBlock("report", "Leadership chat: daily report, weekly summary (Mondays), join / leave / inactive alerts", s.webhook, s.webhook ? "<button type='button' data-weekly" + (sending ? " disabled" : "") + ">Send weekly summary</button>" : "")
         + hookBlock("board", "Leaderboard (one message, kept up to date, with family level)", s.boardHook, "")
@@ -4265,6 +4432,7 @@ function reporter() {
     checkEvening();
     autoRecruits();
     checkRecord();
+    checkOvertakes();
     backfillWars();
     backfillAttendance();
     catchUpLog();
@@ -4272,6 +4440,7 @@ function reporter() {
     heartbeat();
     checkOffline();
     checkStuck();
+    checkGameUpdate();
     tabTitle();
     readMissions();
     trackFamXp();
