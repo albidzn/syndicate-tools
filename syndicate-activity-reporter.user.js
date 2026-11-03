@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.15.0
+// @version      2.15.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.15.0";
+  var VERSION = "2.15.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.15.1": [
+      "Duels: per-player honor. From 121 real fights: a win pays about 5.8% of their honor × (their honor ÷ yours), and the loser loses 80% of what the winner gets. The column shows win and loss, and Best honor weighs both by your win chance."
+    ],
     "2.15.0": [
       "Activity tab and leaderboard: about how long until the next family level. It measures the family's real XP gain, and uses the average AP as a rough estimate until it has 6 hours of that."
     ],
@@ -2667,13 +2670,14 @@ function reporter() {
   }
   // Honor isn't in the game's files, the server decides it, so it's learned from real fights: your own attacks as they happen, and
   // every attack on you from the mail. Each fight record has both players and both rewards, so what an attacker won or lost counts
-  // whoever the attacker was. The game only says "beating a stronger opponent earns more, losing to a weaker one costs more". Against real
-  // fights a curve on the honor gap came out flat, so for now the column is what a typical win pays, and the log keeps levels and who
-  // fought, to find what really drives it. Fight records don't carry honor at the time, so aHonor and dHonor are their honor when read.
-  // Nothing is shown until there are a few fights: a made-up number is worse than none.
+  // whoever the attacker was. Fight records don't carry honor at the time, so aHonor and dHonor are their honor when read, and only
+  // fights read within a day count for the formula. Found in 121 real fights (2026-11-03): the winner gets W and the loser loses 0.8 W, in
+  // both directions, with W = k × loser's honor × (loser's honor ÷ winner's)^p, k 0.058, p 1.07. It predicted a known win of 20-30k
+  // it wasn't fitted on (26k beating 96k: 22.7k), and is usually within 1.5×, sometimes 2.4×: same-pair wins vary, for reasons not found.
+  // With enough fresh fights k and p are refitted from them.
   // s.duelLog = [{id, gain, ratio, won, at}], newest 300 (entries from before 2.12 have no "won" and are wins).
   // s.duelDefended = {won, lost, honor}: attacks on you and your honor change from them, counted once per fight.
-  var HONOR_MIN = 3, HONOR_KEEP = 500, MAIL_PAGES = 10, DUEL_LOG_V = 2, duelSeen = {}, duelSort = "rank", learnState = null;
+  var HONOR_MIN = 3, HONOR_KEEP = 500, MAIL_PAGES = 10, DUEL_LOG_V = 2, HONOR_K = 0.058, HONOR_P = 1.07, HONOR_LOSER = 0.8, HONOR_REFIT = 20, duelSeen = {}, duelSort = "rank", learnState = null;
   function duelSeenInLog(s, id) { return (s.duelSeenIds || []).indexOf(id) >= 0 || (s.duelLog || []).some(function (l) { return l.id === id; }); }
   // Adds one fight record to s (the caller saves). honors: where honor comes from when the record itself doesn't carry it.
   function learnFight(s, d, attackerHonor, defenderHonor, meId) {
@@ -2705,17 +2709,27 @@ function reporter() {
       save(s);
     });
   }
-  function honorEstimate(s, row, myHonor) {
-    if (!row.honor || !myHonor) { return 0; }
-    var wins = honorWins(s);
-    return wins.length >= HONOR_MIN ? Math.max(1, Math.round(median(wins.map(function (l) { return l.gain; })))) : 0;
+  function honorModel(s) {
+    var pts = [];
+    (s.duelLog || []).forEach(function (l) {
+      if (!l.when || !l.aHonor || !l.dHonor || l.at - l.when > DAY) { return; }
+      var w = l.won ? l.gain : l.dgain, loser = l.won ? l.dHonor : l.aHonor, winner = l.won ? l.aHonor : l.dHonor;
+      if (w > 0) { pts.push({ x: Math.log(loser / winner), y: Math.log(w / loser) }); }
+    });
+    var base = { k: HONOR_K, p: HONOR_P, n: 0 };
+    if (pts.length < HONOR_REFIT) { return base; }
+    var mx = pts.reduce(function (a, q) { return a + q.x; }, 0) / pts.length, my = pts.reduce(function (a, q) { return a + q.y; }, 0) / pts.length;
+    var xx = pts.reduce(function (a, q) { return a + (q.x - mx) * (q.x - mx); }, 0), xy = pts.reduce(function (a, q) { return a + (q.x - mx) * (q.y - my); }, 0), xs = pts.map(function (q) { return q.x; });
+    if (Math.max.apply(null, xs) - Math.min.apply(null, xs) < 0.3 || !xx) { return base; }
+    var slope = Math.max(0.5, Math.min(2, xy / xx));
+    return { k: Math.exp(my - slope * mx), p: slope, n: pts.length };
   }
-  // What a lost attack costs against this player, or 0 until there's enough to say.
-  function honorLoss(s, row, myHonor) {
-    if (!row.honor || !myHonor) { return 0; }
-    var lost = honorLosses(s);
-    return lost.length >= HONOR_MIN ? Math.round(median(lost.map(function (l) { return -l.gain; }))) : 0;
-  }
+  // What the winner gets when `winner` beats `loser`.
+  function honorWin(model, winner, loser) { return model.k * loser * Math.pow(loser / winner, model.p); }
+  function honorEstimate(model, row, myHonor) { return row.honor && myHonor ? Math.max(1, Math.round(honorWin(model, myHonor, row.honor))) : 0; }
+  // What a lost attack costs against this player: the same rule the other way round, and the loser loses 80%.
+  function honorLoss(model, row, myHonor) { return row.honor && myHonor ? Math.max(1, Math.round(honorWin(model, row.honor, myHonor) * HONOR_LOSER)) : 0; }
+  function honorShort(v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "k" : String(v); }
   function honorWins(s) { return (s.duelLog || []).filter(function (l) { return l.won !== false; }); }
   function honorLosses(s) { return (s.duelLog || []).filter(function (l) { return l.won === false && l.gain < 0; }); }
   function median(list) { var a = list.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; }
@@ -2874,8 +2888,10 @@ function reporter() {
     var running = learnState && learnState.running, wins = honorWins(s), lost = honorLosses(s), dd = s.duelDefended, h = "<div class='dqhead' style='margin-top:12px'><span class='t grow'>Learned so far</span><button type='button' data-duellearn" + (running ? " disabled" : "") + " title='Reads the newest pages of your duel mail, one fight at a time. Starts no fights.'>" + (running ? "Reading…" : "Learn from mail") + "</button></div><div class='dqfacts'>";
     if (wins.length || lost.length) {
       var most = wins.reduce(function (a, l) { return Math.max(a, l.gain); }, 0);
-      h += "<b>" + wins.length + "</b> won and <b>" + lost.length + "</b> lost attacks" + (wins.length >= HONOR_MIN ? " · A typical win pays <b>+" + Math.round(median(wins.map(function (l) { return l.gain; }))).toLocaleString("en-US") + "</b>" : "") + (lost.length >= HONOR_MIN ? ", a lost attack costs <b>−" + Math.round(median(lost.map(function (l) { return -l.gain; }))).toLocaleString("en-US") + "</b>" : "") + (most ? " · Biggest win seen: <b>+" + most.toLocaleString("en-US") + "</b>" : "");
-    } else { h += "Nothing yet. The honor column stays empty until a few fights are in."; }
+      h += "<b>" + wins.length + "</b> won and <b>" + lost.length + "</b> lost attacks" + (most ? " · Biggest win seen: <b>+" + most.toLocaleString("en-US") + "</b>" : "");
+    } else { h += "No fights read yet."; }
+    var mdl = honorModel(s);
+    h += "<br>Rule found: a win pays about <b>" + (mdl.k * 100).toFixed(1) + "%</b> of their honor × (their honor ÷ yours)" + (mdl.p.toFixed(1) === "1.0" ? "" : "<sup>" + mdl.p.toFixed(1) + "</sup>") + ". The loser loses 80% of that." + (mdl.n ? " Fitted on " + mdl.n + " fresh fights." : "");
     if (dd && dd.won + dd.lost) { h += "<br>Attacks on you: <b>" + dd.won + "</b> won, <b>" + dd.lost + "</b> lost, honor <b>" + (dd.honor > 0 ? "+" : "") + dd.honor.toLocaleString("en-US") + "</b>"; }
     h += "</div>";
     if (running) { h += "<div class='st wait'>" + esc(learnState.step) + "</div>" + (learnState.total ? "<div class='bar' style='margin:6px 0'><i style='width:" + Math.round(learnState.done / learnState.total * 100) + "%'></i></div>" : ""); }
@@ -3041,21 +3057,22 @@ function reporter() {
     }).join("") + "</div>";
     // Players above you first, best rank on top; those below you after them, faded.
     var rows = scan.rows.filter(function (r) { return r.win >= duelFilter; }), est = {};
-    scan.rows.forEach(function (r) { est[r.id] = honorEstimate(s, r, scan.myHonor); });
-    // Without learned numbers, Best honor can only go by how strong they are.
-    var worth = function (r) { return est[r.id] ? est[r.id] * r.win / 100 - honorLoss(s, r, scan.myHonor) * (100 - r.win) / 100 : (r.honor || 0) * r.win; };
+    var model = honorModel(s), myH = me && +me.honor || scan.myHonor;
+    scan.rows.forEach(function (r) { est[r.id] = honorEstimate(model, r, myH); });
+    // What a fight is worth on average: the win weighed by the win chance, less the loss weighed by the chance of losing.
+    var worth = function (r) { return (est[r.id] || 0) * r.win / 100 - honorLoss(model, r, myH) * (100 - r.win) / 100; };
     if (duelSort === "honor") { rows = rows.slice().sort(function (a, b) { return worth(b) - worth(a); }); }
-    var learned = honorWins(s).length, honorTip = learned >= HONOR_MIN ? "What a typical win paid in " + learned + " real fights. Not specific to this player yet: the honor gap turned out not to predict it, so what does is still being worked out." : "Not known yet. Press Learn from mail: it takes " + HONOR_MIN + " won attacks, " + learned + " so far.";
+    var honorTip = "An estimate from the rule found in real fights: usually within 1.5×, sometimes 2.4×.";
     h += "<div class='dqhead' style='margin-top:0'><span class='grow'>Sort</span><span class='seg'>" + [["rank", "Best rank"], ["honor", "Best honor"]].map(function (o) {
       return "<button type='button' data-duelsort='" + o[0] + "'" + (duelSort === o[0] ? " class='on'" : "") + (o[0] === "honor" ? " title='Honor if you win, weighed by your win chance'" : "") + ">" + o[1] + "</button>";
     }).join("") + "</span></div>";
     if (!rows.length) { h += "<div class='nomatch'>Nobody in this range at " + duelFilter + "%+. Try a wider scan or a lower filter.</div>"; }
     else {
-      h += "<table class='dq'><thead><tr><th>Rank</th><th>Player</th><th>Lv</th><th>Win</th><th title='" + esc(honorTip) + "'>Honor</th><th></th></tr></thead><tbody>";
+      h += "<table class='dq'><thead><tr><th>Rank</th><th>Player</th><th>Lv</th><th>Win</th><th title='" + esc(honorTip + " First number: if you win. Second: if you lose.") + "'>Honor</th><th></th></tr></thead><tbody>";
       rows.forEach(function (r) {
         var cls = r.win >= 70 ? "hi" : r.win >= 50 ? "md" : "lo";
         h += "<tr" + (r.rank > scan.myRank ? " class='below'" : "") + "><td>#" + r.rank + "</td><td class='nm2'>" + specIcon(r.spec)
-          + "<a class='who' href='/game/player/" + esc(r.id) + "' title='" + esc((r.family ? r.family + ". " : "") + "Open profile") + "'>" + esc(r.name) + "</a></td><td>" + r.level + "</td><td class='w " + cls + "'>" + r.win + "%</td><td title='" + esc(honorTip + (honorLoss(s, r, scan.myHonor) ? " A lost attack costs about " + honorLoss(s, r, scan.myHonor) + "." : "")) + "'>" + (est[r.id] ? "~" + est[r.id].toLocaleString("en-US") : "?") + "</td>"
+          + "<a class='who' href='/game/player/" + esc(r.id) + "' title='" + esc((r.family ? r.family + ". " : "") + "Open profile") + "'>" + esc(r.name) + "</a></td><td>" + r.level + "</td><td class='w " + cls + "'>" + r.win + "%</td><td style='white-space:nowrap' title='" + esc(honorTip + " Win about +" + (est[r.id] || 0).toLocaleString("en-US") + ", lose about −" + honorLoss(model, r, myH).toLocaleString("en-US") + ". Worth about " + Math.round(worth(r)).toLocaleString("en-US") + " a fight at this win chance.") + "'>" + (est[r.id] ? "+" + honorShort(est[r.id]) + " <span class='idle'>−" + honorShort(honorLoss(model, r, myH)) + "</span>" : "?") + "</td>"
           + "<td><a class='fight' href='/game/duel/compare/" + esc(r.id) + "' title='Open the game&#39;s fight screen. Nothing starts until you press its button.'>Fight ›</a></td></tr>";
       });
       h += "</tbody></table>";
