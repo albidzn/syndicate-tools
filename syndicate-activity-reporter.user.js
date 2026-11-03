@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.17.0
+// @version      2.17.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.17.0";
+  var VERSION = "2.17.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.17.1": [
+      "Your damage: shows your weapon's bonus against each class, like a rifle's +15% against Rogues."
+    ],
     "2.17.0": [
       "Duels: new Your damage table. Your normal and crit hits against each class with your current gear, plus your crit chance and average per attack."
     ],
@@ -2720,7 +2723,8 @@ function reporter() {
       var lo = hit(false, false), hi = hit(false, true), critLo = hit(true, false), critHi = hit(true, true);
       // A landed shot can fire a second one for 10–20% of its damage.
       var avg = odds[0] * (1 - odds[1]) * ((1 - odds[2]) * (lo + hi) / 2 + odds[2] * (critLo + critHi) / 2) * (1 + (st.doubleShotChanceBuffPerc || 0) * 0.15);
-      return { spec: c[0], cut: c[1], lo: lo, hi: hi, critLo: critLo, critHi: critHi, hit: odds[0], dodge: odds[1], crit: odds[2], avg: Math.round(avg) };
+      var vs = st[{ tactician: "damageVsTacticianPerc", rogue: "damageVsRoguePerc", bully: "damageVsBullyPerc" }[c[0]]] || 0;
+      return { spec: c[0], cut: c[1], vs: vs, lo: lo, hi: hi, critLo: critLo, critHi: critHi, hit: odds[0], dodge: odds[1], crit: odds[2], avg: Math.round(avg) };
     });
     return { rows: rows, attack: Math.ceil(st.attack * (1 + (st.attackBuffPerc || 0))), min: mine.weapon.minDamage, max: mine.weapon.maxDamage, bonus: st.damageBuffPerc || 0, extra: st.doubleShotChanceBuffPerc || 0 };
   }
@@ -2742,11 +2746,12 @@ function reporter() {
       + (d.bonus ? " · Damage <b>+" + pct(d.bonus) + "</b>" : "") + (d.extra ? " · Extra shot <b>" + pct(d.extra) + "</b>" : "") + "</div>";
     h += "<table class='dq'><thead><tr><th style='text-align:left'>Against</th><th>Normal</th><th>Crit</th><th title='Per attack, counting crits, misses and dodges'>Average</th></tr></thead><tbody>";
     d.rows.forEach(function (r) {
-      h += "<tr><td class='nm2' style='text-align:left;white-space:nowrap' title='Takes " + r.cut + "% less damage'>" + specIcon(r.spec) + SPECS[r.spec] + " <span class='idle'>−" + r.cut + "%</span></td>"
+      h += "<tr><td style='text-align:left;white-space:nowrap;color:var(--fg)' title='Takes " + r.cut + "% less damage'>" + specIcon(r.spec) + SPECS[r.spec] + "<div style='font-size:11px'><span class='idle'>−" + r.cut + "%</span>"
+        + (r.vs ? " <span style='color:" + (r.vs > 0 ? "#93d36d" : "#ff8a8a") + "' title='Your weapon does " + pct(Math.abs(r.vs)) + (r.vs > 0 ? " more" : " less") + " damage against this class'>" + (r.vs > 0 ? "+" : "−") + pct(Math.abs(r.vs)) + "</span>" : "") + "</div></td>"
         + "<td style='white-space:nowrap'>" + n(r.lo) + "–" + n(r.hi) + "</td><td style='white-space:nowrap'>" + n(r.critLo) + "–" + n(r.critHi) + "</td>"
         + "<td title='You hit " + pct(r.hit) + " of the time, then they dodge " + pct(r.dodge) + "' style='color:var(--fg);font-weight:600'>" + n(r.avg) + "</td></tr>";
     });
-    return h + "</tbody></table><div class='mqnote'>With your current gear, against a player at your level with no toughness or armor. Toughness lowers your crit chance, armor lowers your damage, and players above your level take less. Items thrown during a fight aren't counted.</div>";
+    return h + "</tbody></table><div class='mqnote'>" + (d.rows.some(function (r) { return r.vs; }) ? "Next to each class: its damage reduction, then your weapon's bonus against it. " : "") + "With your current gear, against a player at your level with no toughness or armor. Toughness lowers your crit chance, armor lowers your damage, and players above your level take less. Items thrown during a fight aren't counted.</div>";
   }
   function runDuelScan() {
     if (duelState && duelState.running) { return; }
