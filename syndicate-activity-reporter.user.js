@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.13.1
+// @version      2.14.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.13.1";
+  var VERSION = "2.14.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.14.0": [
+      "War planner: queue the next attack while one is planned. Any family can be queued, also the one we're attacking now. It's declared as soon as our battle and theirs are both over, and if someone else attacks them meanwhile it waits for that battle too."
+    ],
     "2.13.1": [
       "Duels: Learn from mail works now. It was looking in the wrong game file."
     ],
@@ -2078,6 +2081,9 @@ function reporter() {
   // warDeclaration has no "blocked" reason), the same "declare" command as the Family tab's Attack button is sent.
   // It gives up 30 minutes after the expected time, or if we have another attack planned by then. Only while the game is
   // open on this PC, and only Godfathers and Counselors can declare.
+  // While we have an attack planned, one next attack can be queued (s.autoAttack.afterWar = that war's id): it goes out at the later of
+  // our battle and the target's own battle. Any family in the scan can be queued, the one we're attacking now too, since its battle is ours.
+  // If someone else attacks the target meanwhile, the expected time moves to their battle instead of running out.
   var ATTACK_POLL = 15000, ATTACK_LEAD = 30000, ATTACK_GIVEUP = 30 * 60000, attackBusy = false, attackAt = 0, attackNote = "";
   function canDeclare(p) { return !!p && (!p.rank || p.rank === "godfather" || p.rank === "counselor"); }
   function ourAttack() { return last ? warsOf(last.fam).filter(function (w) { return w.status === "preparing" && w.attackerId === last.fam.id; })[0] : null; }
@@ -2090,17 +2096,21 @@ function reporter() {
   function armAttack(id, now) {
     var s = load(), t = targets(s).filter(function (x) { return String(x.id) === String(id); })[0];
     if (!t) { return; }
-    var ours = ourAttack(); // the buttons are hidden then, this catches a panel that hadn't redrawn yet
-    if (ours) { alert("We already have an attack planned on " + nameOf(ours.defender) + ". The game allows one at a time."); redraw(); return; }
+    var ours = ourAttack(), ourEnd = ours ? startOf(ours) : 0;
+    if (ours && now) { alert("We already have an attack planned on " + nameOf(ours.defender) + ". The game allows one at a time, so this one can only be queued for after that battle."); redraw(); return; }
     if (s.autoAttack) { alert("An attack on " + s.autoAttack.name + " is already armed. Cancel it first to pick another family."); redraw(); return; }
     var c = t.ratio ? chance(s, t.ratio) : null;
-    var q = (now ? "Declare war on " + t.name + " now?" : "Declare war on " + t.name + " automatically as soon as they can be attacked" + (t.freeAt ? " (expected " + clock(t.freeAt) + ")" : "") + "?")
+    var expected = now ? Date.now() : Math.max(ourEnd, t.busy || ours ? t.freeAt || 0 : 0, Date.now());
+    var q = (now ? "Declare war on " + t.name + " now?" : ours ? "Declare war on " + t.name + " right after our battle against " + nameOf(ours.defender) + (expected > ourEnd ? " and their own battle" : "") + " (expected " + clock(expected) + ")?"
+      : "Declare war on " + t.name + " automatically as soon as they can be attacked" + (t.freeAt ? " (expected " + clock(t.freeAt) + ")" : "") + "?")
       + (c != null ? "\n\nWin chance ~" + c + "%." : "")
       + (now ? "" : "\n\nThe game has to stay open on this PC until then.");
     if (!confirm(q)) { return; }
-    s.autoAttack = { id: t.id, name: t.name, freeAt: now ? Date.now() : t.freeAt || Date.now(), armedAt: Date.now(), chance: c };
+    s.autoAttack = { id: t.id, name: t.name, freeAt: expected, armedAt: Date.now(), chance: c };
+    if (ours) { s.autoAttack.afterWar = ours.id; s.autoAttack.afterName = nameOf(ours.defender); }
     save(s); attackAt = 0; attackNote = "";
-    if (!now && s.webhook) { postFor("autoattack", s.webhook, shout("⏰ **Auto-attack armed:** war on **" + md(t.name) + "** will be declared as soon as they're free" + (t.freeAt ? " (<t:" + Math.round(t.freeAt / 1000) + ":R>)" : "") + (c != null ? ", ~" + c + "% win chance" : "") + ".")); }
+    if (!now && s.webhook) { postFor("autoattack", s.webhook, shout(ours ? "⏭️ **Next attack queued:** war on **" + md(t.name) + "** will be declared after our battle against **" + md(nameOf(ours.defender)) + "** (<t:" + Math.round(expected / 1000) + ":R>)" + (c != null ? ", ~" + c + "% win chance" : "") + "."
+      : "⏰ **Auto-attack armed:** war on **" + md(t.name) + "** will be declared as soon as they're free" + (t.freeAt ? " (<t:" + Math.round(t.freeAt / 1000) + ":R>)" : "") + (c != null ? ", ~" + c + "% win chance" : "") + ".")); }
     redraw();
   }
   function disarmAttack() {
@@ -2125,6 +2135,10 @@ function reporter() {
     var s = load(), a = s.autoAttack, now = Date.now();
     if (!a || attackBusy || !last || !client || now < attackAt || now < a.freeAt - ATTACK_LEAD) { return; }
     var ours = ourAttack();
+    // Our own battle goes first. Past its start time the family list may still show it for a few minutes, so the game's answer decides from there.
+    var waiting = ours && a.afterWar !== undefined && String(ours.id) === String(a.afterWar);
+    if (waiting && now < startOf(ours)) { return; }
+    if (waiting) { ours = null; }
     if (ours && ours.defenderId !== a.id) { finishAttack(false, "we already have an attack planned on " + nameOf(ours.defender) + ", and only one at a time is allowed."); return; }
     if (ours) { finishAttack(true, "war on " + a.name + " is planned."); return; } // declared already (by us or by hand)
     if (now > a.freeAt + ATTACK_GIVEUP) { finishAttack(false, "still not attackable 30 minutes after the expected time" + (a.why ? " (the game said: " + a.why + ")" : "") + "."); return; }
@@ -2132,7 +2146,17 @@ function reporter() {
     var why = function (text) { var n = load(); if (n.autoAttack) { n.autoAttack.why = text; save(n); } };
     familyFresh(a.id).then(function (f) {
       var wd = f && f.warDeclaration;
-      if (!wd || wd.blocked) { why(wd ? String(wd.blocked) : "their family page didn't say"); return; }
+      if (!wd || wd.blocked) {
+        why(wd ? String(wd.blocked) : "their family page didn't say");
+        // Attacked by someone else meanwhile: wait for that battle instead of giving up.
+        var until = (f && Array.isArray(f.scheduledWars) ? f.scheduledWars : []).filter(function (w) { return w.defenderId === a.id; }).reduce(function (m, w) { return Math.max(m, startOf(w) || 0); }, 0);
+        var n = load();
+        if (n.autoAttack && until > Date.now() && until > n.autoAttack.freeAt) {
+          n.autoAttack.freeAt = until; save(n);
+          if (n.webhook) { postFor("autoattack", n.webhook, shout("⏳ **Auto-attack on " + md(a.name) + ":** they've been attacked by someone else. Waiting for that battle, now expected <t:" + Math.round(until / 1000) + ":R>.")); }
+        }
+        return;
+      }
       return familyCommand().then(function (fn) {
         return fn({ data: { requestId: crypto.randomUUID(), command: { action: "declare", familyId: last.fam.id, opponentId: a.id } } });
       }).then(function () {
@@ -2144,8 +2168,8 @@ function reporter() {
   function attackStatus(s) {
     var a = s.autoAttack;
     if (a) {
-      return "<div class='st wait'>⏰ Auto-attack armed on <b>" + esc(a.name) + "</b>: "
-        + (Date.now() < a.freeAt - ATTACK_LEAD ? "declaring as soon as they're free, " + inTime(a.freeAt) : "trying now" + (a.why ? " (the game says: " + esc(a.why) + ")" : "") + "…")
+      return "<div class='st wait'>" + (a.afterWar !== undefined ? "⏭ Next attack queued on <b>" : "⏰ Auto-attack armed on <b>") + esc(a.name) + "</b>: "
+        + (Date.now() < a.freeAt - ATTACK_LEAD ? (a.afterWar !== undefined ? "declaring after our battle against " + esc(a.afterName || "them") + ", " : "declaring as soon as they're free, ") + inTime(a.freeAt) : "trying now" + (a.why ? " (the game says: " + esc(a.why) + ")" : "") + "…")
         + " <button type='button' data-disarm>Cancel</button> <span class='idle'>Cancel it to pick another family.</span></div>";
     }
     return attackNote ? "<div class='st " + (/^✅/.test(attackNote) ? "ok" : "") + "'>" + esc(attackNote) + "</div>" : "";
@@ -3365,6 +3389,11 @@ function reporter() {
     tipBox.style.left = x + "px"; tipBox.style.top = Math.max(8, y) + "px";
   }
   // War planner view: our strength, then every family within ±10 ranks, best targets first; families under attack at the bottom.
+  // While an attack is planned: queue this family as the next one. Shows when that would be if it's later than the end of our battle.
+  function queueButton(t, ourEnd) {
+    var at = Math.max(ourEnd, t.freeAt || 0);
+    return (at > ourEnd ? " <span class='free'>⏭ from " + clock(at) + "</span>" : "") + " <button type='button' class='inv' data-arm='" + esc(t.id) + "' title='Declare war on them automatically at " + clock(at) + (at > ourEnd ? ", once their own battle is over" : ", right after our battle") + "'>⏭ Attack next</button>";
+  }
   function plannerHtml(s) {
     var sc = s.scan, us = summary(last.fam), h = "";
     h += "<div class='stats' style='grid-template-columns:repeat(3,1fr)'>"
@@ -3372,7 +3401,7 @@ function reporter() {
       + "<div class='stat'><b>" + us.avg + "</b><span>avg member level</span></div>"
       + "<div class='stat'><b>" + (sc ? "#" + sc.own : "–") + "</b><span>our rank" + (sc ? " (can attack " + Math.max(1, sc.own - WINDOW) + "–" + (sc.own + WINDOW) + ")" : "") + "</span></div></div>";
     var ours = warsOf(last.fam).filter(function (w) { return w.status === "preparing" && w.attackerId === last.fam.id; });
-    if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ". The next attack can be planned after that battle.</div>"; }
+    if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ". " + (s.autoAttack ? "" : canDeclare(last.fam.private) ? "You can queue the next attack below, for right after that battle." : "") + "</div>"; }
     var armed = s.autoAttack, mayDeclare = canDeclare(last.fam.private);
     if (scanning && scanning.running) { h += "<div class='st wait'>" + esc(scanning.step) + "</div>"; }
     else if (scanning && scanning.error) { h += "<div class='st bad'>Scan failed: " + esc(scanning.error) + ".</div>"; }
@@ -3400,7 +3429,8 @@ function reporter() {
             : t.attacked ? " <span class='free now'>✅ free since " + clock(t.freeAt) + "</span>"
             : t.attacking ? " <span class='idle'>attacking" + (on && on !== "?" ? " " + esc(on) : "") + "</span>" : "")
           + (!mayDeclare ? "" : armed && String(armed.id) === String(t.id) ? " <span class='free'>⏰ armed</span>"
-            : armed || ours.length ? "" // one attack at a time: the planned or armed one has to be fought or cancelled first
+            : armed ? "" // one armed or queued attack at a time
+            : ours.length ? queueButton(t, startOf(ours[0]))
             : t.busy ? " <button type='button' class='inv' data-arm='" + esc(t.id) + "' title='Declare war on them automatically as soon as they can be attacked'>⏰ Attack when free</button>"
             : " <button type='button' class='inv' data-attacknow='" + esc(t.id) + "'>⚔️ Attack now</button>") + "</td>"
           + "<td>" + (t.level || "?") + "</td><td>" + (t.members || "?") + "</td><td>" + (t.sum ? t.sum.avg : "?") + "</td><td>" + (t.sum ? t.sum.top5 : "?") + "</td>"
