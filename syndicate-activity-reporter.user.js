@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.13.0
+// @version      2.13.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.13.0";
+  var VERSION = "2.13.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.13.1": [
+      "Duels: Learn from mail works now. It was looking in the wrong game file."
+    ],
     "2.13.0": [
       "Duels: Where to put stat points. Tries each of your stats a bit higher in simulated fights against players of your class, and compares your base stats with theirs."
     ],
@@ -2499,7 +2502,7 @@ function reporter() {
     if (!idx) { return Promise.reject(new Error("the game's files weren't found, reload the game and try again")); }
     var dir = idx.replace(/index-[\w-]+\.js.*$/, "");
     return fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
-      var file = function (name) { var m = t.match(new RegExp(name + "-[\\w-]+\\.js")); if (!m) { throw new Error("the game's " + name + " file wasn't found (the game may have changed)"); } return dir + m[0]; };
+      var file = function (name) { var m = t.match(new RegExp("(?:^|[^\\w-])(" + name + "-[\\w-]+\\.js)")); if (!m) { throw new Error("the game's " + name + " file wasn't found (the game may have changed)"); } return dir + m[1]; };
       return Promise.all([import(file("computeFight")), import(file("Random")), import(file("duels"))]);
     }).then(function (got) {
       var kit = { fight: null, Rnd: null, opponent: null, duel: null };
@@ -2644,7 +2647,7 @@ function reporter() {
     var csf = res.filter(function (n) { return /\/assets\/createServerFn-[\w-]+\.js/.test(n); })[0], idx = res.filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
     if (!csf || !idx) { return Promise.reject(new Error("the game's files weren't found, reload the game and try again")); }
     return Promise.all([import(csf), fetch(idx).then(function (r) { return r.text(); })]).then(function (got) {
-      var mod = got[0], file = (got[1].match(/mail-[\w-]+\.js/) || [])[0];
+      var mod = got[0], file = (got[1].match(/(?:^|[^\w-])(mail-[\w-]+\.js)/) || [])[1]; // not the end of "verify-email-…"
       if (!file) { throw new Error("the mail page wasn't found in the game's files"); }
       return fetch(idx.replace(/index-[\w-]+\.js.*$/, file)).then(function (r) { return r.text(); }).then(function (t) {
         var id = (t.match(/handler\(\w+\(`([0-9a-f]{64})`\)\),\w+=\(\w+,\w+\)=>\w+\(\{queryKey:\w+\.mailbox/) || [])[1], rpc = null, make = null;
@@ -2807,9 +2810,9 @@ function reporter() {
     return duelTools().then(function (kit) {
       var idx = performance.getEntriesByType("resource").map(function (e) { return e.name; }).filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
       return fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
-        var m = t.match(/dialogs-[\w-]+\.js/);
+        var m = t.match(/(?:^|[^\w-])(dialogs-[\w-]+\.js)/);
         if (!m) { throw new Error("the game's gang war data wasn't found (the game may have changed)"); }
-        return import(idx.replace(/index-[\w-]+\.js.*$/, m[0]));
+        return import(idx.replace(/index-[\w-]+\.js.*$/, m[1]));
       }).then(function (mod) {
         var foe = null, list = null;
         Object.keys(mod).forEach(function (k) {
