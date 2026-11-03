@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.19.1
+// @version      2.19.2
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.19.1";
+  var VERSION = "2.19.2";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.19.2": [
+      "Wide game dialogs, like Travel, now fit beside the docked panel instead of sliding under it."
+    ],
     "2.19.1": [
       "The game's hover boxes now show on top of the panel instead of being cut off by it."
     ],
@@ -4182,7 +4185,7 @@ function reporter() {
     dockNow = w;
     if (!dockStyle) { dockStyle = document.createElement("style"); document.head.appendChild(dockStyle); }
     dockStyle.textContent = !w ? "" : "body > [data-syn-root]{width:calc(100% - " + w + "px)!important;transform:translateX(0)}"
-      + ".mantine-Modal-inner{width:calc(100% - " + w + "px)!important}";
+      + ".mantine-Modal-inner{width:calc(100% - " + w + "px)!important;padding-inline:0!important}"; // its side padding is 5% of the whole window, which pushed wide dialogs under the panel
   }
   function wouldDock() { return !pos && window.innerWidth - window.innerHeight * STAGE_VH >= DOCK_MIN; }
   function place() {
