@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.16.0
+// @version      2.16.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.16.0";
+  var VERSION = "2.16.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.16.1": [
+      "The mission timer is now a draining strip under the Personal and Family buttons, so it shows on every tab. Click it to open the Godfather bar."
+    ],
     "2.16.0": [
       "Missions: shows when your running mission is ready, your energy, and for the best mission of your filter how much is missing and when you'll have enough. Missions you can't afford yet show in yellow."
     ],
@@ -2399,7 +2402,7 @@ function reporter() {
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
     + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
     + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID table.mem td.tg{position:relative}#ID button.awaybtn{position:absolute;left:-16px;top:50%;transform:translateY(-50%);border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
-    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .mqstat{margin:0 0 5px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted)}#ID .mqstat b{color:var(--fg);font-weight:600}#ID .mqstat.warn,#ID .mqstat.warn b{color:#e8c46a}#ID .mqstat.ok,#ID .mqstat.ok b{color:#93d36d}#ID .lvline{margin:0 0 6px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted);cursor:help}#ID .lvline b{color:var(--fg);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
+    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID a.mrun{position:relative;display:flex;justify-content:space-between;align-items:center;gap:8px;height:22px;margin-top:8px;padding:0 8px;border-radius:6px;overflow:hidden;background:var(--soft);color:var(--fg);font-size:12px;text-decoration:none}#ID a.mrun:hover{outline:1px solid var(--accent)}#ID .mfill{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.38;transition:width 1s linear}#ID a.mrun.ready .mfill{background:#6bb133}#ID .mtxt,#ID .mleft{position:relative;white-space:nowrap}#ID .mleft{font-weight:600;font-variant-numeric:tabular-nums}#ID .mqstat{margin:0 0 5px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted)}#ID .mqstat b{color:var(--fg);font-weight:600}#ID .mqstat.warn,#ID .mqstat.warn b{color:#e8c46a}#ID .mqstat.ok,#ID .mqstat.ok b{color:#93d36d}#ID .lvline{margin:0 0 6px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted);cursor:help}#ID .lvline b{color:var(--fg);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
@@ -2559,9 +2562,26 @@ function reporter() {
     var q = client && client.getQueryCache().find({ queryKey: ["getActiveQuest"] }), d = q && q.state.data;
     if (!d || !d.data || typeof d.data.seconds !== "number" || !d.startedAt) { return null; }
     var m = missions.filter(function (x) { return x.id != null && x.id === d.questId; })[0];
-    return { left: Math.max(0, Math.ceil(d.data.seconds - (Date.now() - new Date(d.startedAt).getTime()) / 1000)), name: m ? m.name : "" };
+    return { left: Math.max(0, Math.ceil(d.data.seconds - (Date.now() - new Date(d.startedAt).getTime()) / 1000)), total: d.data.seconds, name: m ? m.name : d.data.giver ? mqNice(d.data.giver) : "" };
   }
-  function missionKey() { var run = missionRunning(), me = duelMe(); return (run ? run.left : "") + "|" + (me ? me.energy : ""); }
+  function missionKey() { var me = duelMe(); return me ? me.energy : ""; }
+  function missionState() { var run = missionRunning(); return !run ? "" : (run.left ? "running" : "ready") + run.name; }
+  function missionBarHtml() {
+    var run = missionRunning();
+    if (!run) { return ""; }
+    return "<a class='mrun" + (run.left ? "" : " ready") + "' href='" + BAR + "' title='Open the Godfather bar'><i class='mfill' style='width:" + missionPct(run) + "%'></i><span class='mtxt'>" + (run.left ? "⏱ " : "✅ ") + esc(run.name || "Mission") + "</span><b class='mleft'>" + missionLeftText(run) + "</b></a>";
+  }
+  function missionPct(run) { return run.left && run.total > 0 ? Math.max(0, Math.min(100, run.left / run.total * 100)).toFixed(1) : 100; }
+  function missionLeftText(run) { return run.left ? clockText(run.left) + " · " + clock(Date.now() + run.left * 1000) : "ready"; }
+  function updateMissionBar() {
+    if (!box) { return; }
+    var run = missionRunning(), fill = box.querySelector(".mfill"), left = box.querySelector(".mleft"), chip = box.querySelector(".mrunchip");
+    if (!run) { return; }
+    if (fill) { fill.style.width = missionPct(run) + "%"; }
+    if (left) { left.textContent = missionLeftText(run); }
+    if (chip) { chip.textContent = run.left ? clockText(run.left) : "ready"; }
+  }
+  setInterval(updateMissionBar, 1000);
   function clockText(sec) { return sec >= 3600 ? leftText(sec * 1000) : Math.floor(sec / 60) + ":" + ("0" + sec % 60).slice(-2); }
   // Energy goes up by 1 every 13 minutes by the clock: at :00, :13, :26, :39 and :52 of each hour (UTC minutes, the same in most time zones).
   var ENERGY_STEP = 13, ENERGY_MAX = 100;
@@ -2577,10 +2597,7 @@ function reporter() {
     return t;
   }
   function missionStatusHtml(best) {
-    var me = duelMe(), run = missionRunning(), h = "";
-    if (run) {
-      h += "<div class='mqstat" + (run.left ? "" : " ok") + "'>" + (run.left ? "⏱ " + (run.name ? esc(run.name) + " " : "Mission ") + "ready in <b>" + clockText(run.left) + "</b> (" + clock(Date.now() + run.left * 1000) + ")" : "✅ " + (run.name ? esc(run.name) : "Your mission") + " is <b>ready</b>") + "</div>";
-    }
+    var me = duelMe(), h = "";
     if (me && typeof me.energy === "number" && best) {
       var have = me.energy, short = best.energy - have;
       h += "<div class='mqstat" + (short > 0 ? " warn" : "") + "'>⚡ Energy <b>" + have.toFixed(1) + "</b> · " + esc(best.name) + " needs <b>" + best.energy + "</b>"
@@ -3250,7 +3267,7 @@ function reporter() {
     if (!last) { return "<span class='mc'>Loading…</span>"; }
     var h = "<span class='mc' title='Members at 100 points today'><b>" + full + "/" + list.length + "</b></span>", nw = nextWar();
     var runNow = missionRunning();
-    if (runNow) { h = "<span class='mc" + (runNow.left ? "" : " warn") + "' title='" + esc(runNow.name || "Your mission") + "'>🎯 <b>" + (runNow.left ? clockText(runNow.left) : "ready") + "</b></span>" + h; }
+    if (runNow) { h = "<span class='mc" + (runNow.left ? "" : " warn") + "' title='" + esc(runNow.name || "Your mission") + "'>🎯 <b class='mrunchip'>" + (runNow.left ? clockText(runNow.left) : "ready") + "</b></span>" + h; }
     else if (lastPath === BAR && missions.length) { var mode = mqMode(); h = "<span class='mc' title='" + MQ_MODES[mode].title + "'>🎯 <b>" + esc(mqRank(mode).bs.name) + "</b></span>" + h; }
     if (nw) {
       var side = warSignups(last.fam)[nw.side.attack ? "attack" : "defense"], n = list.filter(function (m) { return side && side.ids[m.id]; }).length;
@@ -3363,6 +3380,7 @@ function reporter() {
       html += "<div class='volrow'><span>Game sound</span><input type='range' min='0' max='100' step='1' value='" + volume + "' data-volslider>"
         + "<b class='vv'>" + (volume ? volume + "%" : "Off") + "</b></div>";
     }
+    html += missionBarHtml();
     if (area === "personal") {
       html += "<div class='tabs'>" + [["missions", "🎯 Missions"], ["duels", "⚔️ Duels"], ["gang", "🗺️ Gang war"], ["timers", "⏱ Timers"]].map(function (o) {
         return "<button type='button' data-ptab='" + o[0] + "'" + (personalTab === o[0] ? " class='on'" : "") + ">" + o[1] + "</button>";
@@ -3897,7 +3915,7 @@ function reporter() {
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + (area === "personal" && personalTab === "missions" ? missionKey() : "") + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + missionState() + (area === "personal" && personalTab === "missions" ? missionKey() : "") + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
