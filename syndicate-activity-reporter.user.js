@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.16.5
+// @version      2.16.6
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.16.5";
+  var VERSION = "2.16.6";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.16.6": [
+      "Daily report: sending it again now repeats the same numbers, and no longer takes levels away from the next report."
+    ],
     "2.16.5": [
       "Timers: the city you're in now stands out, with a coloured column."
     ],
@@ -1098,17 +1101,28 @@ function reporter() {
   var area = startPath === BAR || startPath === DUELS ? "personal" : "family", personalTab = startPath === DUELS ? "duels" : "missions";
   if (startPath === GANGWAR) { area = "personal"; personalTab = "gang"; }
 
+  // Level and gold when a day ended, from its history: the first ones seen after it, not changed later. was = what to use otherwise.
+  function atDayEnd(s, day, id, was) {
+    var r = s.hist && s.hist[day] && s.hist[day][id];
+    return r ? Object.assign({}, was, { level: r.lv, gold: r.g }) : was;
+  }
   function send(manual) {
     var mid = dayStart(Date.now()), day = dayKey(mid - 1), s = load();
     if (!s.webhook || !last || sending) { return; }
-    // Sending the same day again (by hand) compares against the same earlier report as the first send did.
-    var base = s.sentDay === day ? s.prev : s.base;
-    var list = members(last.fam);
+    // Sending the same day again (by hand) repeats the first send: same earlier report, same levels, and the next report still starts where this one ended.
+    var again = s.sentDay === day, base = again ? s.prev : s.base, list = members(last.fam);
+    if (again) { list = list.map(function (m) { return atDayEnd(s, day, m.id, m); }); }
+    else if (base) {
+      var from = {}; // who was there comes from the last report, levels and gold from when its day ended
+      Object.keys(base).forEach(function (id) { from[id] = atDayEnd(s, s.sentDay, id, base[id]); });
+      base = from;
+    }
     var payload = buildReport(last.fam.name, list, base || null, mid - 1, idleAll(s, list, mid));
     sending = true; error = ""; note = ""; redraw();
     post(s.webhook, payload).then(function () {
       var now = load();
-      now.prev = base || null; now.base = snapshot(members(last.fam)); now.sentDay = day; now.sentAt = Date.now(); delete now.lock;
+      if (!again) { now.prev = base || null; now.base = snapshot(list); now.sentDay = day; }
+      now.sentAt = Date.now(); delete now.lock;
       save(now);
       note = manual ? "Sent again." : "";
     }, function (e) {
