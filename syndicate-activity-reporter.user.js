@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.16.2
+// @version      2.16.3
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.16.2";
+  var VERSION = "2.16.3";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.16.3": [
+      "Duels: counts your attacks per player and hides anyone you've attacked 3 times today (4 with a Spy). Counting starts with this version."
+    ],
     "2.16.2": [
       "Timers: the bonus opponent no longer shows ready when there's none left to fight. It shows which district has one open, or a reward waiting."
     ],
@@ -2680,7 +2683,7 @@ function reporter() {
     var myRank = me.ranking && +me.ranking.position || 0;
     if (!myRank) { duelState = { error: "Your place in the ranking isn't known yet. Open the game's ranking once and try again." }; redraw(); return; }
     duelState = { running: true, step: "Loading the game's duel code…" }; redraw();
-    var myHonor = +me.honor || 0, range = duelRange, first = Math.max(1, myRank - range), lastWanted = myRank + Math.ceil(range / 2), found = [], seen = {}, own = {};
+    var foeKeys = "", myHonor = +me.honor || 0, range = duelRange, first = Math.max(1, myRank - range), lastWanted = myRank + Math.ceil(range / 2), found = [], seen = {}, own = {};
     if (last) { members(last.fam).forEach(function (m) { own[m.id] = true; }); }
     duelTools().then(function (kit) {
       return playerRanking().then(function (fn) {
@@ -2714,12 +2717,13 @@ function reporter() {
           return (i ? wait(SCAN_GAP) : Promise.resolve()).then(function () { return client.fetchQuery(kit.opponent({ data: { id: found[i].id } })); }).then(function (foe) {
             if (!foe) { fails++; return; }
             fails = 0;
-            var row = found[i]; row.win = duelWinChance(kit, me, foe); rows.push(row); duelFoes[row.id] = foe;
+            var row = found[i]; row.win = duelWinChance(kit, me, foe); rows.push(row); duelFoes[row.id] = foe; foeKeys = Object.keys(foe).sort().join(",");
           }, function () { fails++; }).then(function () { return next(i + 1); });
         }
         return next(0).then(function () {
           if (!rows.length && found.length) { throw new Error("no opponent could be loaded"); }
           var s = load();
+          s.duelKeys = s.duelKeys || {}; s.duelKeys.opponent = foeKeys;
           s.duelScan = { at: Date.now(), myRank: myRank, myHonor: myHonor, rows: rows, partial: rows.length < found.length };
           save(s);
           duelState = null;
@@ -2754,6 +2758,24 @@ function reporter() {
     s.duelLog = (s.duelLog || []).concat([{ id: d.id, gain: gain, ratio: defenderHonor / attackerHonor, won: !!d.won, at: Date.now(), when: d.createdAt ? +new Date(d.createdAt) : 0,
       aid: c.attacker.id, did: c.defender.id, axp: +c.attacker.xp || 0, dxp: +c.defender.xp || 0, aspec: c.attacker.spec, dspec: c.defender.spec, dgain: +(d.rewards.defender || {}).honor || 0, aHonor: attackerHonor, dHonor: defenderHonor }]).slice(-HONOR_KEEP);
   }
+  // Each player can be attacked 3 times a day, 4 with an active Spy. The game's files have no count, the server just refuses, and no list of
+  // your own attacks exists, so they're counted here as each fight appears: s.duelAttacks = [{id, did, when}], kept 3 days.
+  // Assumes the day turns over at the game's 00:00 UTC reset. Attacks made before this version, or from another browser, aren't known.
+  var DUEL_CAP = 3, DUEL_KEEP = 3 * 864e5;
+  function countOwnAttack(d) {
+    var s = load(), list = s.duelAttacks || [], now = Date.now();
+    if (list.some(function (a) { return a.id === d.id; })) { return; }
+    s.duelAttacks = list.filter(function (a) { return now - a.when <= DUEL_KEEP; }).concat([{ id: d.id, did: d.characters.defender.id, when: d.createdAt ? +new Date(d.createdAt) : now }]);
+    save(s);
+  }
+  function duelCap(me) {
+    var spy = me && (me.gang || []).some(function (g) { return g && g.id === "spy" && new Date(g.endsAt).getTime() > Date.now(); });
+    return DUEL_CAP + (spy ? 1 : 0);
+  }
+  function attacksToday(s, id) {
+    var mid = dayStart(Date.now());
+    return (s.duelAttacks || []).filter(function (a) { return String(a.did) === String(id) && a.when >= mid; }).length;
+  }
   function learnDuels() {
     var me = client && duelMe();
     if (!me) { return; }
@@ -2761,6 +2783,7 @@ function reporter() {
       var d = q.state && q.state.data, c = d && d.characters;
       if (!d || duelSeen[d.id] || !c || !c.attacker || !c.defender || !d.rewards || !d.rewards.attacker) { return; }
       duelSeen[d.id] = true;
+      if (c.attacker.id === me.id) { countOwnAttack(d); }
       if (c.attacker.id !== me.id || learnState && learnState.running) { return; } // attacks on you come in through the mail scan, with their honor looked up
       var s = load(), scan = s.duelScan, row = scan && scan.rows.filter(function (r) { return r.id === c.defender.id; })[0];
       if (duelSeenInLog(s, d.id)) { return; }
@@ -3116,17 +3139,19 @@ function reporter() {
     if (running) { h += "<div class='st wait'>" + esc(duelState.step) + "</div>" + (duelState.total ? "<div class='bar' style='margin:6px 0'><i style='width:" + Math.round(duelState.done / duelState.total * 100) + "%'></i></div>" : ""); }
     if (duelState && duelState.error) { h += "<div class='st bad'>Couldn't scan: " + esc(duelState.error) + ".</div>"; }
     if (!scan) { return h + (running ? "" : "<div class='mqnote'>Press Scan to rate the players around your rank. It loads them one by one, about a second each, and starts no fights.</div>") + learnHtml(s); }
-    var count = function (min) { return scan.rows.filter(function (r) { return r.win >= min; }).length; };
+    var cap = duelCap(me), used = {};
+    scan.rows.forEach(function (r) { used[r.id] = attacksToday(s, r.id); });
+    var count = function (min) { return scan.rows.filter(function (r) { return r.win >= min && (!min || used[r.id] < cap); }).length; }, capped = scan.rows.filter(function (r) { return used[r.id] >= cap; }).length;
     h += "<div class='mfilters'>" + [[70, "Beatable 70%+"], [50, "50%+"], [0, "All"]].map(function (o) {
       return "<button type='button' data-duelfilter='" + o[0] + "'" + (duelFilter === o[0] ? " class='on'" : "") + ">" + o[1] + " " + count(o[0]) + "</button>";
     }).join("") + "</div>";
     // Players above you first, best rank on top; those below you after them, faded.
-    var rows = scan.rows.filter(function (r) { return r.win >= duelFilter; }), est = {};
+    var rows = scan.rows.filter(function (r) { return r.win >= duelFilter && (!duelFilter || used[r.id] < cap); }), est = {};
     var model = honorModel(s), myH = me && +me.honor || scan.myHonor;
     scan.rows.forEach(function (r) { est[r.id] = honorEstimate(model, r, myH); });
     // What a fight is worth on average: the win weighed by the win chance, less the loss weighed by the chance of losing.
     var worth = function (r) { return (est[r.id] || 0) * r.win / 100 - honorLoss(model, r, myH) * (100 - r.win) / 100; };
-    if (duelSort === "honor") { rows = rows.slice().sort(function (a, b) { return worth(b) - worth(a); }); }
+    if (duelSort === "honor") { rows = rows.slice().sort(function (a, b) { return (used[a.id] >= cap) - (used[b.id] >= cap) || worth(b) - worth(a); }); }
     var honorTip = "An estimate from the rule found in real fights: usually within 1.5×, sometimes 2.4×.";
     h += "<div class='dqhead' style='margin-top:0'><span class='grow'>Sort</span><span class='seg'>" + [["rank", "Best rank"], ["honor", "Best honor"]].map(function (o) {
       return "<button type='button' data-duelsort='" + o[0] + "'" + (duelSort === o[0] ? " class='on'" : "") + (o[0] === "honor" ? " title='Honor if you win, weighed by your win chance'" : "") + ">" + o[1] + "</button>";
@@ -3136,13 +3161,16 @@ function reporter() {
       h += "<table class='dq'><thead><tr><th>Rank</th><th>Player</th><th>Lv</th><th>Win</th><th title='" + esc(honorTip + " First number: if you win. Second: if you lose.") + "'>Honor</th><th></th></tr></thead><tbody>";
       rows.forEach(function (r) {
         var cls = r.win >= 70 ? "hi" : r.win >= 50 ? "md" : "lo";
-        h += "<tr" + (r.rank > scan.myRank ? " class='below'" : "") + "><td>#" + r.rank + "</td><td class='nm2'>" + specIcon(r.spec)
+        var full = used[r.id] >= cap;
+        h += "<tr" + (r.rank > scan.myRank || full ? " class='below'" : "") + "><td>#" + r.rank + "</td><td class='nm2'>" + specIcon(r.spec)
           + "<a class='who' href='/game/player/" + esc(r.id) + "' title='" + esc((r.family ? r.family + ". " : "") + "Open profile") + "'>" + esc(r.name) + "</a></td><td>" + r.level + "</td><td class='w " + cls + "'>" + r.win + "%</td><td style='white-space:nowrap' title='" + esc(honorTip + " Win about +" + (est[r.id] || 0).toLocaleString("en-US") + ", lose about −" + honorLoss(model, r, myH).toLocaleString("en-US") + ". Worth about " + Math.round(worth(r)).toLocaleString("en-US") + " a fight at this win chance.") + "'>" + (est[r.id] ? "+" + honorShort(est[r.id]) + " <span class='idle'>−" + honorShort(honorLoss(model, r, myH)) + "</span>" : "?") + "</td>"
-          + "<td><a class='fight' href='/game/duel/compare/" + esc(r.id) + "' title='Open the game&#39;s fight screen. Nothing starts until you press its button.'>Fight ›</a></td></tr>";
+          + "<td style='white-space:nowrap'>" + (full ? "<span class='idle' title='You attacked them " + used[r.id] + " times today, the daily limit. Resets at 00:00 UTC.'>" + used[r.id] + "/" + cap + " today</span>"
+            : "<a class='fight' href='/game/duel/compare/" + esc(r.id) + "' title='Open the game&#39;s fight screen. Nothing starts until you press its button." + (used[r.id] ? " Attacked " + used[r.id] + " of " + cap + " times today." : "") + "'>" + (used[r.id] ? used[r.id] + "/" + cap + " " : "") + "Fight ›</a>") + "</td></tr>";
       });
       h += "</tbody></table>";
     }
     var age = Math.max(0, Math.round((now - scan.at) / 60000));
+    if (capped && duelFilter) { h += "<div class='mqnote'>" + capped + " player" + (capped === 1 ? "" : "s") + " hidden: already attacked " + cap + " times today. See All.</div>"; }
     return h + adviceHtml(s) + learnHtml(s) + "<div class='mqnote'>Scanned " + (age < 1 ? "just now" : age < 60 ? age + "m ago" : leftText(now - scan.at) + " ago") + (scan.partial ? ", some players couldn't be loaded" : "") + ". Win % is " + DUEL_SIMS + " simulated fights with the game's own formula, using your consumables. A real fight can still go either way.</div>";
   }
 
