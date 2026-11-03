@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.20.0
+// @version      2.21.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,14 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.20.0";
+  var VERSION = "2.21.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.21.0": [
+      "New Extras menu beside Discord settings, with a switch and a test button for everything fun, per PC.",
+      "JARVIS voice (off until you switch it on), startup and effect sounds, Red Alert before battles, victory and defeat screens, level-up fireworks, a news ticker and a threat radar in the War planner.",
+      "Most Wanted: a poster of last week's most active member in the family chat every Monday. There's also a secret code."
+    ],
     "2.20.0": [
       "New startup animation with the family logo and a personal welcome when the panel opens. Click to skip it; Discord settings can switch it off or play it again."
     ],
@@ -514,6 +519,30 @@ function reporter() {
       "## 👑 Regime change\n{who} passed {them} for the top spot in the family. Honor rank **#{rank}**.",
       "🚨 Coup alert! {who} has taken the family's best honor rank from {them}: **#{rank}**."
     ],
+
+    vGreet: [
+      "Good {part}, {name}. All systems are online.",
+      "Welcome back, {name}. All systems are online.",
+      "{name}. Good to see you again. All systems online.",
+      "Systems online. The family is waiting, {name}.",
+      "Good {part}, {name}. The family is in good hands."
+    ],
+    vGreetWar: ["Battle against {foe} in {left}.", "We fight {foe} in {left}.", "Your next battle, against {foe}, is in {left}."],
+    vMission: ["Your mission is ready.", "Mission complete, boss.", "Your mission has finished. The next job is waiting.", "That job is done, boss. What's next?"],
+    vWarAttack: ["War declared on {foe}. Battle in {left}.", "We are going after {foe}. Battle in {left}.", "New target, {foe}. Battle in {left}."],
+    vWarDefend: ["Alert. {foe} has declared war on us. Battle in {left}.", "Warning. {foe} is coming for us. Battle in {left}.", "We are under attack by {foe}. Battle in {left}."],
+    vWarSoon: ["Battle against {foe} in {left}.", "{left} until the battle against {foe}.", "Heads up, boss. {foe} in {left}."],
+    vWin: ["Victory against {foe}.", "We beat {foe}. Well done, boss.", "{foe} has been dealt with. Victory."],
+    vLoss: ["We lost against {foe}. We will remember this.", "Defeat against {foe}. We go again.", "{foe} got this one, boss. It won't happen twice."],
+    vMvp: ["The MVP is {name}.", "{name} was the best of us tonight.", "Most valuable fighter: {name}."],
+    vLevel: ["Congratulations. You have reached level {lv}.", "Level {lv}, boss. Very impressive.", "You are now level {lv}. The others should be worried."],
+    vFamLevel: ["The family has reached level {lv}.", "Family level {lv}. The empire grows, boss."],
+    vReset: ["One hour until the daily reset. You are at {ap} activity.", "Boss, one hour left today, and you are only at {ap} activity."],
+    fxWin: ["Clean work, everyone. Nobody saw anything.", "Drinks at the bakery. Don't bring the receipts.", "Another one for the wall.", "Well done. Nonna made extra.", "That's how it's done. Take notes, other families.", "Tell your friends. Actually, don't."],
+    fxLoss: ["Heads up. We'll remember this one.", "Tough one. Regroup, gear up, go again.", "Not our night. There's always another night.", "Eat something. Then we plan.", "Nobody's mad. Well. Somebody's mad.", "Write the name in the little black book."],
+    tickJoke: ["Police baffled.", "Sources say it was the grinding.", "Nobody saw a thing.", "The family denies everything.", "Nonna is proud.", "More at eleven.", "The mayor declined to comment.", "Vinnie says the numbers check out.", "Witnesses have stopped talking.", "Stay tuned."],
+    posterReward: ["The eternal respect of the family", "One slightly better cannoli", "Bragging rights until next Monday", "A seat at the big table", "Nonna's approval, which is priceless", "Whatever is in Vinnie's envelope"],
+    posterLine: ["🤠 **MOST WANTED this week:** {who}, wanted for **{ap} activity**. Approach with caution.", "🤠 The sheriff has spoken: {who} is **Most Wanted** with **{ap} activity**.", "🤠 **WANTED:** {who}, last seen grinding **{ap} activity** in one week. Do not attempt to keep up.", "🤠 New poster on the saloon wall: {who}, **{ap} activity**. The family salutes you."],
 
     don1: [
       "💰 {who} donated **{gold} gold** to the family treasury. Thank you! 🙏",
@@ -3924,7 +3953,8 @@ function reporter() {
     loadSpecIcons();
     var s = load(), sortBy = SORTS[s.sort] ? s.sort : "today", html = "<style>" + css.replace(/#ID/g, "#" + ID) + "</style>";
     var close = "<button type='button' class='icon' data-close title='Close'>&times;</button>";
-    box.className = city() + (s.min ? " min" : "");
+    box.className = city() + (s.min ? " min" : "") + fxClasses(s);
+    fxStyle();
     var st = status(s), list = last ? members(last.fam) : [], start = gainsToday(s);
     list.forEach(function (m) { m.levels = start && m.id in start ? m.level - start[m.id] : null; });
     var full = list.filter(function (m) { return m.today >= FULL; }).length;
@@ -3948,7 +3978,7 @@ function reporter() {
       html += "<div class='volrow'><span>Game sound</span><input type='range' min='0' max='100' step='1' value='" + volume + "' data-volslider>"
         + "<b class='vv'>" + (volume ? volume + "%" : "Off") + "</b></div>";
     }
-    html += missionBarHtml();
+    html += alertHtml(s) + missionBarHtml();
     if (area === "personal") {
       html += "<div class='tabs'>" + [["missions", "🎯 Missions"], ["duels", "⚔️ Duels"], ["gang", "🗺️ Gang war"], ["timers", "⏱ Timers"]].map(function (o) {
         return "<button type='button' data-ptab='" + o[0] + "'" + (personalTab === o[0] ? " class='on'" : "") + ">" + o[1] + "</button>";
@@ -4015,7 +4045,7 @@ function reporter() {
       + (lvError ? "<div class='st bad'>Couldn't post a level milestone: " + esc(lvError) + ". Trying again in a few minutes.</div>" : "")
       + (apError ? "<div class='st bad'>Couldn't post an activity shout-out: " + esc(apError) + ". Trying again in a few minutes.</div>" : "")
       + Object.keys(fails).map(function (k) {
-        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", autoattack: "an auto-attack note", gamecheck: "the game update alarm", overtake: "an honor rank post", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
+        return "<div class='st bad'>Couldn't post " + ({ streak: "a streak shout-out", famlv: "the family level-up", month: "the monthly awards", alerts: "a family alert", planner: "the war planner", recruits: "the recruit list", boost: "a boost reminder", boostfam: "the boost news", debrief: "the war debrief", attendance: "the war attendance", evening: "the evening reminder", recruitalert: "the new-recruit alert", ranks: "the rank suggestions", record: "the new-record shout-out", version: "the update notes", autoattack: "an auto-attack note", gamecheck: "the game update alarm", poster: "the Most Wanted poster", overtake: "an honor rank post", rush: "the level-rush shout-out", donation: "a donation shout-out", autoboost: "an auto-renew note" }[k] || k)
           + ": " + esc(fails[k]) + ". Trying again in a few minutes.</div>";
       }).join("")
       + (s.webhook && s.gameCheck && Object.keys(s.gameCheck.broken || {}).length ? "<div class='st bad'>🚨 Not working since a game update: " + esc(Object.keys(s.gameCheck.broken).join(", ")) + ".</div>" : "")
@@ -4023,12 +4053,13 @@ function reporter() {
         : "🏆 Leaderboard " + (s.boardAt ? "updated " + clock(s.boardAt) : "goes up in a moment") + ".") + "</div>" : "")
       + "<div class='row'>"
       + (s.webhook && last ? "<button type='button' data-send" + (sending ? " disabled" : "") + ">" + (s.sentDay === dayKey(dayStart(Date.now()) - 1) ? "Send report again" : "Send report now") + "</button>" : "")
-      + "<button type='button' data-setup>" + (showSetup ? "Hide Discord settings" : "Discord settings") + "</button></div>";
+      + "<button type='button' data-setup>" + (showSetup ? "Hide Discord settings" : "Discord settings") + "</button>"
+      + "<button type='button' data-extras>" + (showExtras ? "Hide extras" : "✨ Extras") + "</button></div>"
+      + (showExtras ? extrasHtml(s) : "");
     if (showSetup) {
       html += "<div class='setup'>Only one leader needs these. Each Discord channel gets its own webhook: open the channel's settings (gear icon) → <b>Integrations</b> → <b>Webhooks</b> → <b>New Webhook</b> → <b>Copy Webhook URL</b>, and paste it below."
         + "<div class='row'><button type='button' data-backup>Download backup</button><button type='button' data-restore>Restore backup</button></div>"
         + backupHtml(s)
-        + "<div class='row' style='margin-top:6px'><button type='button' data-introtoggle title='Plays over the panel when the game loads. A click skips it.'>Startup animation: " + (s.intro === false ? "off" : "on") + "</button><button type='button' data-introplay>Play it now</button></div>"
         + (s.webhook && s.gameCheck ? "<div style='font-size:11.5px;color:var(--muted);margin-top:4px'>🔧 Game update check, " + clock(s.gameCheck.at) + ": " + (Object.keys(s.gameCheck.broken || {}).length ? "some tools aren't working, see above." : "all tools found.") + "</div>" : "")
         + "<div style='font-size:11.5px;color:var(--muted);margin-top:4px'>The backup holds the webhooks, Discord links and history. Keep it private: anyone with it can post in your channels.</div>"
         + hookBlock("report", "Leadership chat: daily report, weekly summary (Mondays), join / leave / inactive alerts", s.webhook, s.webhook ? "<button type='button' data-weekly" + (sending ? " disabled" : "") + ">Send weekly summary</button>" : "")
@@ -4124,6 +4155,7 @@ function reporter() {
       }).join("") + "</span><span class='seg'>" + [["best", "Best target"], ["win", "Win %"], ["free", "Free soonest"]].map(function (o) {
         return "<button type='button' data-psort='" + o[0] + "' class='" + (v.sort === o[0] ? "on" : "") + "'>" + o[1] + "</button>";
       }).join("") + "</span></div>";
+      h += radarHtml(s, all);
       h += "<table><thead><tr><th>#</th><th>Family</th><th>Lv</th><th title='Members'>Mem</th><th title='Average member level'>Avg</th><th title='Average level of their top 5'>Top 5</th><th>Honor</th>"
         + "<th title='Win chance. A rough guess from levels until " + LEARN_MIN + " of our wars are logged, then learned from our results.'>Win %</th></tr></thead><tbody>";
       if (!rows.length) { h += "<tr><td colspan='8' style='text-align:center'>No families " + (v.show === "ready" ? "ready to attack right now." : v.show === "busy" ? "under attack right now." : "found in our window.") + "</td></tr>"; }
@@ -4280,6 +4312,8 @@ function reporter() {
   function onChange(ev) {
     var t = ev.target, k = t && t.getAttribute && t.getAttribute("data-rf");
     if (t && t.hasAttribute && t.hasAttribute("data-volslider")) { var sv = load(); sv.volume = +t.value; save(sv); setVolume(sv.volume); t.blur(); redraw(); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-voicepick")) { var sp = load(); sp.voiceName = t.value; save(sp); speak(say("vGreet", { part: "evening", name: fxMe().name || "boss" }), true); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-voicevol")) { var sq = load(); sq.voiceVol = +t.value; save(sq); t.blur(); speak("Volume set.", true); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-ra")) { var s0 = load(); s0.recruitAlertMin = Math.max(0, parseInt(t.value, 10) || 0); save(s0); t.blur(); redraw(); return; }
     if (!k) { return; }
     var s = load(), rf = recruitFilter(s);
@@ -4351,7 +4385,9 @@ function reporter() {
     if (t.hasAttribute("data-rinv")) { var ri = recruitFilter(s); ri.inv = t.getAttribute("data-rinv"); s.recruitFilter = ri; save(s); redraw(); return; }
     if (t.hasAttribute("data-rsort")) { var rs = recruitFilter(s); rs.sort = t.getAttribute("data-rsort"); s.recruitFilter = rs; save(s); redraw(); return; }
     if (t.hasAttribute("data-introtoggle")) { s.intro = s.intro === false; save(s); redraw(); return; }
-    if (t.hasAttribute("data-introplay")) { playIntro(); return; }
+    if (t.hasAttribute("data-extras")) { showExtras = !showExtras; redraw(); return; }
+    if (t.hasAttribute("data-fx")) { var fk = t.getAttribute("data-fx"); s.fx = s.fx || {}; s.fx[fk] = !fxOn(s, fk); save(s); redraw(); return; }
+    if (t.hasAttribute("data-fxtest")) { fxTest(t.getAttribute("data-fxtest")); return; }
     if (t.hasAttribute("data-overtoggle")) { s.overtakes = s.overtakes === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-ratoggle")) { s.recruitAlert = s.recruitAlert === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-rscan")) { runRecruitScan(); return; }
@@ -4427,6 +4463,633 @@ function reporter() {
       sendNow(s.warHook, { username: "Syndicate Wars", content: "<@&" + s.warRole + "> 🔔 Test: war alerts will ping this role.", allowed_mentions: { parse: [], roles: [s.warRole] } })
         .then(function () { alert("Test ping sent. Check your Discord channel."); }, function (e) { alert("Couldn't send: " + (e && e.message || e)); });
     }
+  }
+
+  // ===== Extras: effects, sounds and the voice =====
+  // Just for fun, each with a switch per PC in the panel's Extras (s.fx = {name: true or false}). The voice starts switched off, since a
+  // talking panel shouldn't surprise anyone; the rest starts on. Nothing here posts to Discord except the Most Wanted poster.
+  var FX_ON = { sound: true, voice: false, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
+  var showExtras = false, fxQueue = [], fxActive = null, fxStyleEl = null;
+  function fxOn(s, k) { return s.fx && typeof s.fx[k] === "boolean" ? s.fx[k] : FX_ON[k]; }
+  function fxStyle() {
+    if (fxStyleEl) { return; }
+    fxStyleEl = document.createElement("style"); fxStyleEl.textContent = FX_CSS; document.head.appendChild(fxStyleEl);
+  }
+  var FX_CSS = "#syn-fx{position:fixed;z-index:2147483647;overflow:hidden;cursor:pointer;color:#f2ede2;font:13px/1.4 system-ui,sans-serif;text-align:center;user-select:none;animation:synfIn .3s ease-out both}"
+    + "#syn-fx *{box-sizing:border-box}#syn-fx.out{pointer-events:none;animation:synfOut .55s ease-in both}"
+    + "#syn-fx .fcv{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}"
+    + "#syn-fx .fin{position:absolute;inset:0;padding:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}"
+    + "#syn-fx .fhint{position:absolute;left:0;right:0;bottom:8px;font:9.5px ui-monospace,Consolas,monospace;letter-spacing:.18em;color:rgba(255,255,255,.34)}"
+    + "#syn-fx .fstamp{font:400 min(19vw,74px)/1 Impact,'Arial Black',sans-serif;letter-spacing:.03em;will-change:transform,opacity}"
+    + "#syn-fx .fcrest{height:150px;will-change:transform,opacity}"
+    + "#syn-fx .ffoe{font:600 13px/1.3 ui-monospace,Consolas,monospace;letter-spacing:.2em;text-transform:uppercase;animation:synfUp .5s ease-out .95s both}"
+    + "#syn-fx .fquip{font:italic 14px/1.35 Georgia,serif;opacity:.86;animation:synfUp .5s ease-out 1.15s both}"
+    + "#syn-fx .fnums{display:flex;gap:8px;width:100%;margin-top:4px;animation:synfUp .5s ease-out 1.35s both}"
+    + "#syn-fx .fnum{flex:1;padding:8px 2px;border:1px solid rgba(255,255,255,.14);border-radius:6px;background:rgba(0,0,0,.28)}#syn-fx .fnum b{display:block;font:700 19px/1.15 ui-monospace,Consolas,monospace}#syn-fx .fnum span{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;opacity:.7}"
+    + "#syn-fx .fmvp{width:100%;padding:9px 10px;border-radius:6px;border:1px solid currentColor;background:rgba(0,0,0,.3);animation:synfUp .5s ease-out 1.6s both}#syn-fx .fmvp small{display:block;font-size:9.5px;letter-spacing:.2em;opacity:.8}#syn-fx .fmvp b{display:block;font-size:20px;line-height:1.25;color:#fff}#syn-fx .fmvp span{font-size:12px;opacity:.85}"
+    + "#syn-fx .fyou,#syn-fx .frew{font-size:12px;opacity:.82;animation:synfUp .5s ease-out 1.85s both}"
+    // Victory
+    + "#syn-fx.win{background:radial-gradient(circle at 50% 34%,#6a4a10,#1c1305 58%,#090602)}#syn-fx.win .fmvp,#syn-fx.win .ffoe{color:#ffd66e}"
+    + "#syn-fx .frays{position:absolute;left:50%;top:32%;width:190%;aspect-ratio:1;margin:-95% 0 0 -95%;background:repeating-conic-gradient(rgba(255,214,110,.13) 0 9deg,transparent 9deg 24deg);border-radius:50%;-webkit-mask:radial-gradient(circle,#000,transparent 68%);mask:radial-gradient(circle,#000,transparent 68%);will-change:transform;animation:synfSpin 26s linear infinite}"
+    + "#syn-fx.win .fstamp{background:linear-gradient(180deg,#fff6cf,#ffd258 46%,#b67812);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 0 rgba(0,0,0,.55)) drop-shadow(0 0 18px rgba(255,190,60,.6));animation:synfSlam .55s cubic-bezier(.2,1.1,.3,1) .35s both}"
+    + "#syn-fx.win .fcrest{filter:drop-shadow(0 0 16px rgba(255,200,90,.75));animation:synfRise .7s cubic-bezier(.16,1,.3,1) .1s both}"
+    + "#syn-fx.win .fshock{position:absolute;left:50%;top:50%;width:80px;height:80px;margin:-40px;border:3px solid #ffe08a;border-radius:50%;opacity:0;animation:synfShock .8s ease-out .62s both}"
+    + "#syn-fx.win .fin{animation:synfShake .4s linear .62s both}"
+    // Defeat
+    + "#syn-fx.lose{background:radial-gradient(circle at 50% 30%,#3a1216,#120709 62%,#050304)}#syn-fx.lose .fmvp,#syn-fx.lose .ffoe{color:#ff9aa2}"
+    + "#syn-fx .frain{position:absolute;left:-30%;right:-30%;top:-40%;height:180%;opacity:.26;will-change:transform;background:repeating-linear-gradient(100deg,transparent 0 13px,rgba(200,215,240,.55) 13px 14px,transparent 14px 29px);-webkit-mask:repeating-linear-gradient(180deg,#000 0 26px,transparent 26px 62px);mask:repeating-linear-gradient(180deg,#000 0 26px,transparent 26px 62px);animation:synfRain .62s linear infinite}"
+    + "#syn-fx .frain.r2{opacity:.14;animation-duration:.95s;background-size:100%;transform:scaleX(-1)}"
+    + "#syn-fx.lose .fstamp{color:#c9c4c4;text-shadow:0 3px 0 #000,0 0 24px rgba(255,40,60,.5);animation:synfFall 1.2s cubic-bezier(.3,.7,.2,1) .25s both}"
+    + "#syn-fx.lose .fcrest{filter:grayscale(1) brightness(.55);animation:synfFlick 1.8s linear .1s both}"
+    // Fireworks and poster
+    + "#syn-fx.fw{background:radial-gradient(circle at 50% 42%,rgba(0,0,0,.62),rgba(0,0,0,.2) 72%);pointer-events:none;cursor:default}#syn-fx.fw .fstamp{color:#ffe08a;text-shadow:0 3px 0 rgba(0,0,0,.7),0 0 26px rgba(255,190,60,.85);font-size:50px;animation:synfPop 3.3s cubic-bezier(.2,1,.3,1) both}#syn-fx.fw .fsub{font:700 14px/1.3 ui-monospace,Consolas,monospace;letter-spacing:.14em;color:#fff;text-shadow:0 2px 4px #000;animation:synfPop 3.3s cubic-bezier(.2,1,.3,1) .08s both}"
+    + "#syn-fx.posterview{background:rgba(5,4,3,.92)}#syn-fx.posterview img{max-width:100%;max-height:92%;box-shadow:0 8px 30px #000;animation:synfRise .5s cubic-bezier(.16,1,.3,1) both}"
+    // Secret code
+    + "#syn-matrix{position:fixed;inset:0;z-index:2147483647;cursor:pointer;background:#000;animation:synfIn .5s ease-out both}#syn-matrix canvas{position:absolute;inset:0;width:100%;height:100%}#syn-matrix div{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;pointer-events:none;font:700 15px ui-monospace,Consolas,monospace;letter-spacing:.42em;color:#d8ffe0;text-shadow:0 0 12px #2bff66;animation:synfIn 1.2s ease-out 1.6s both}#syn-matrix img{height:38vh;filter:drop-shadow(0 0 22px #2bff66)}"
+    // Red Alert, ticker and radar (the panel's own styles only apply inside it)
+    + "#syn-activity-panel.redalert{border-color:#ff2d3f!important;animation:synfRed 1.3s ease-in-out infinite}"
+    + "#syn-activity-panel .rabar{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:7px 10px;border-radius:6px;color:#fff;font:700 12px/1.25 system-ui,sans-serif;letter-spacing:.04em;background:repeating-linear-gradient(-45deg,#8d0f1c 0 12px,#b5152a 12px 24px);background-size:34px 34px;animation:synfHaz 1s linear infinite}"
+    + "#syn-activity-panel .rabar .ratxt{flex:1;min-width:0}#syn-activity-panel .rabar small{display:block;font-weight:600;opacity:.92}#syn-activity-panel .rabar .raleft{font:700 21px/1 ui-monospace,Consolas,monospace;text-shadow:0 0 8px #ff8a95}"
+    + "#syn-activity-panel.hasticker{padding-bottom:32px}#syn-activity-panel.hasticker:not(.dock){max-height:calc(100vh - 72px)}"
+    + "#syn-ticker{position:fixed;z-index:2147483647;height:24px;overflow:hidden;display:flex;align-items:stretch;background:#07090f;border-top:1px solid rgba(255,255,255,.14);font:600 12px/24px system-ui,sans-serif;color:#e9edf5;white-space:nowrap}"
+    + "#syn-ticker b{flex:none;position:relative;z-index:1;padding:0 9px;background:#d3142a;color:#fff;font-size:10.5px;letter-spacing:.1em}"
+    + "#syn-ticker .tkw{flex:1;overflow:hidden;position:relative}#syn-ticker .tkt{position:absolute;left:0;top:0;will-change:transform;animation:synfTick var(--tk) linear both}#syn-ticker:hover .tkt{animation-play-state:paused}"
+    + "#syn-activity-panel .radar{position:relative;width:min(100%,260px);aspect-ratio:1;margin:10px auto 4px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.04),rgba(0,0,0,.35));box-shadow:inset 0 0 0 1px var(--strong)}"
+    + "#syn-activity-panel .radar .rsw{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,transparent 0 72%,color-mix(in srgb,var(--accent) 48%,transparent) 100%);will-change:transform;animation:synfSpin 4s linear infinite;pointer-events:none}"
+    + "#syn-activity-panel .radar svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}#syn-activity-panel .radar .rb{animation:synfBlink 1.4s ease-in-out infinite}"
+    + "#syn-activity-panel .radar img{position:absolute;left:50%;top:50%;height:13%;transform:translate(-50%,-50%);opacity:.8;pointer-events:none}"
+    + "#syn-activity-panel .xrow{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}#syn-activity-panel .xrow .xn{flex:1;min-width:120px;font-size:12px}#syn-activity-panel .xrow select{max-width:100%;font-size:12px}"
+    + "@keyframes synfIn{from{opacity:0}to{opacity:1}}@keyframes synfOut{to{opacity:0}}@keyframes synfSpin{to{transform:rotate(360deg)}}"
+    + "@keyframes synfUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}"
+    + "@keyframes synfSlam{from{opacity:0;transform:scale(3.1)}70%{opacity:1;transform:scale(.93)}to{opacity:1;transform:none}}"
+    + "@keyframes synfRise{from{opacity:0;transform:translateY(22px) scale(.86)}to{opacity:1;transform:none}}"
+    + "@keyframes synfShock{from{opacity:.95;transform:scale(.4)}to{opacity:0;transform:scale(7)}}"
+    + "@keyframes synfShake{0%,100%{transform:none}20%{transform:translate(-5px,3px)}40%{transform:translate(5px,-4px)}60%{transform:translate(-3px,-2px)}80%{transform:translate(3px,2px)}}"
+    + "@keyframes synfRain{from{transform:translateY(0)}to{transform:translateY(62px)}}"
+    + "@keyframes synfFall{from{opacity:0;transform:translateY(-34px)}to{opacity:1;transform:none}}"
+    + "@keyframes synfFlick{0%{opacity:0}8%{opacity:.8}12%{opacity:.1}24%{opacity:.7}30%{opacity:.2}46%,100%{opacity:1}}"
+    + "@keyframes synfPop{0%{opacity:0;transform:scale(.4)}14%{opacity:1;transform:scale(1.1)}22%{transform:none}78%{opacity:1}100%{opacity:0;transform:translateY(-14px)}}"
+    + "@keyframes synfRed{0%,100%{box-shadow:0 0 8px 1px rgba(255,45,63,.45),inset 0 0 12px rgba(255,45,63,.14)}50%{box-shadow:0 0 30px 7px rgba(255,45,63,.95),inset 0 0 34px rgba(255,45,63,.34)}}"
+    + "@keyframes synfHaz{to{background-position:34px 0}}"
+    + "@keyframes synfTick{from{transform:translateX(var(--tkw))}to{transform:translateX(-100%)}}"
+    + "@keyframes synfBlink{0%,100%{opacity:1}50%{opacity:.25}}";
+  function fxMe() {
+    var me = duelMe(), self = null;
+    if (me && last) { self = members(last.fam).filter(function (m) { return m.id === String(me.id) || m.name === me.name; })[0] || null; }
+    return { me: me, self: self, name: me && (me.name || me.login) || self && self.name || "" };
+  }
+  function warFoe(fam, w) { return nameOf(w.attackerId === fam.id ? w.defender : w.attacker); }
+  function fxNum(v) { return (+v || 0).toLocaleString("en-US"); }
+
+  // ----- Sounds, made in the browser. They go through the volume slider like the game's own sounds. -----
+  var fxCtx = null;
+  function fxAudio() { // resolves with a running sound context, or nothing if the browser wants a click on the page first
+    if (!window.AudioContext) { return Promise.resolve(null); }
+    try { if (!fxCtx) { fxCtx = new AudioContext(); } } catch (e) { return Promise.resolve(null); }
+    if (fxCtx.state === "running") { return Promise.resolve(fxCtx); }
+    return Promise.race([fxCtx.resume().catch(function () {}), new Promise(function (r) { setTimeout(r, 200); })]).then(function () { return fxCtx.state === "running" ? fxCtx : null; });
+  }
+  function fxTone(c, o) { // o: {f, to, at, d, type, g, lp}
+    var t = c.currentTime + (o.at || 0), n = c.createOscillator(), g = c.createGain(), end = t + o.d, out = g;
+    n.type = o.type || "sine"; n.frequency.setValueAtTime(o.f, t);
+    if (o.to) { n.frequency.exponentialRampToValueAtTime(o.to, end); }
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.g || 0.08, t + Math.min(0.04, o.d / 3)); g.gain.exponentialRampToValueAtTime(0.0001, end);
+    n.connect(g);
+    if (o.lp) { var l = c.createBiquadFilter(); l.type = "lowpass"; l.frequency.value = o.lp; g.connect(l); out = l; }
+    out.connect(c.destination); n.start(t); n.stop(end + 0.02);
+  }
+  var FX_SOUNDS = {
+    boot: function (c) {
+      fxTone(c, { f: 48, to: 120, d: 1.9, g: 0.13, type: "sawtooth", lp: 300 }); fxTone(c, { f: 96, to: 240, d: 1.9, at: 0.15, g: 0.06, lp: 900 });
+      [0.55, 0.85, 1.15, 1.45].forEach(function (at, i) { fxTone(c, { f: 660 + i * 220, d: 0.09, at: at, g: 0.05, type: "square", lp: 2400 }); });
+      [392, 587, 784].forEach(function (f) { fxTone(c, { f: f, d: 1.5, at: 3.75, g: 0.05, type: "triangle" }); });
+    },
+    alarm: function (c) {
+      for (var i = 0; i < 6; i++) { fxTone(c, { f: i % 2 ? 392 : 523, d: 0.34, at: i * 0.36, g: 0.1, type: "sawtooth", lp: 1700 }); }
+    },
+    victory: function (c) {
+      [[0.35, 392], [0.52, 523], [0.69, 659], [0.86, 784]].forEach(function (n) { fxTone(c, { f: n[1], d: 0.32, at: n[0], g: 0.09, type: "sawtooth", lp: 2600 }); });
+      [523, 659, 784, 1047].forEach(function (f) { fxTone(c, { f: f, d: 1.9, at: 1.05, g: 0.07, type: "sawtooth", lp: 3000 }); });
+    },
+    defeat: function (c) {
+      fxTone(c, { f: 110, to: 49, d: 3, at: 0.2, g: 0.16, type: "sawtooth", lp: 420 });
+      [220, 262, 311].forEach(function (f, i) { fxTone(c, { f: f, to: f * 0.9, d: 2.3, at: 0.35 + i * 0.1, g: 0.05, type: "triangle" }); });
+    },
+    fireworks: function (c) {
+      [0, 0.45, 0.85, 1.3].forEach(function (at, i) { fxTone(c, { f: 300 + i * 90, to: 1500, d: 0.22, at: at, g: 0.025 }); fxTone(c, { f: 150, to: 40, d: 0.32, at: at + 0.22, g: 0.14, type: "square", lp: 700 }); });
+    },
+    matrix: function (c) {
+      fxTone(c, { f: 55, to: 82, d: 4, g: 0.12, type: "sawtooth", lp: 380 });
+      [880, 1175, 1568].forEach(function (f, i) { fxTone(c, { f: f, d: 0.8, at: 1.5 + i * 0.2, g: 0.035, type: "triangle" }); });
+    }
+  };
+  function fxSound(name, force) {
+    if (!force && !fxOn(load(), "sound")) { return; }
+    fxAudio().then(function (c) { if (c) { FX_SOUNDS[name](c); } }).catch(function () {});
+  }
+
+  // ----- The voice. Browsers only let a page speak after a click on it, so what's said before that waits for the first click, for up to a minute. -----
+  var voiceWaiting = null, voiceGreeted = false, voiceMission = null;
+  function voiceList() {
+    if (!window.speechSynthesis) { return []; }
+    var all = speechSynthesis.getVoices() || [], en = all.filter(function (v) { return /^en/i.test(v.lang); });
+    return en.length ? en : all;
+  }
+  function voicePick(s) {
+    var list = voiceList(), saved = list.filter(function (v) { return v.name === s.voiceName; })[0];
+    if (saved) { return saved; }
+    // The closest to a British butler that this PC has.
+    var wanted = [/Ryan.*Natural/i, /Thomas.*Natural/i, /Guy.*Natural/i, /Google UK English Male/i, /George/i, /Daniel/i, /David/i, /Mark/i];
+    for (var i = 0; i < wanted.length; i++) {
+      var hit = list.filter(function (v) { return wanted[i].test(v.name); })[0];
+      if (hit) { return hit; }
+    }
+    return list.filter(function (v) { return /^en-GB/i.test(v.lang); })[0] || list[0] || null;
+  }
+  function speak(text, force) {
+    if (!window.speechSynthesis || !text) { return; }
+    var s = load();
+    if (!force && !fxOn(s, "voice")) { return; }
+    if (!force && navigator.userActivation && !navigator.userActivation.hasBeenActive) { voiceWaiting = { text: text, at: Date.now() }; return; }
+    var u = new SpeechSynthesisUtterance(text), v = voicePick(s);
+    if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = 0.98; u.pitch = 0.9; u.volume = (typeof s.voiceVol === "number" ? s.voiceVol : 80) / 100;
+    speechSynthesis.speak(u);
+  }
+  ["pointerdown", "keydown"].forEach(function (k) {
+    window.addEventListener(k, function () {
+      if (!voiceWaiting) { return; }
+      var w = voiceWaiting; voiceWaiting = null;
+      if (Date.now() - w.at < 60000) { setTimeout(function () { speak(w.text); }, 50); }
+    }, true);
+  });
+  if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = function () { if (showExtras) { redraw(); } }; }
+  function leftWords(ms) { // "3 hours" or "25 minutes", for saying out loud
+    var m = Math.max(1, Math.round(ms / 60000));
+    if (m >= 90) { var h = Math.round(m / 60); return h + " hour" + (h === 1 ? "" : "s"); }
+    return m + " minute" + (m === 1 ? "" : "s");
+  }
+  // What the voice says by itself, once per thing. s.voiceSaid = {wars: {id: "new" or "soon"}, day}; its first look stays quiet about what's already known.
+  function checkVoice() {
+    var s = load();
+    if (!fxOn(s, "voice") || !window.speechSynthesis) { return; }
+    var who2 = fxMe();
+    if (!voiceGreeted && who2.name && last) {
+      voiceGreeted = true;
+      var reloaded = 0; try { reloaded = +sessionStorage.getItem("syn-reload") || 0; } catch (e) {}
+      if (!document.hidden && Date.now() - reloaded > 2 * 60000) {
+        var hour = new Date().getHours(), part = hour < 5 ? "evening" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening", nw0 = nextWar();
+        speak(say("vGreet", { part: part, name: who2.name }) + (nw0 ? " " + say("vGreetWar", { foe: warFoe(last.fam, nw0.w), left: leftWords(startOf(nw0.w) - Date.now()) }) : ""));
+      }
+    }
+    var run = missionRunning();
+    if (run) { if (voiceMission > 0 && run.left === 0) { speak(say("vMission")); } voiceMission = run.left; } else { voiceMission = null; }
+    if (!last || !last.fam.private) { return; }
+    var fam = last.fam, seen = s.voiceSaid, changed = !seen, now = Date.now();
+    if (!seen) { seen = s.voiceSaid = { wars: {}, day: "" }; warsOf(fam).forEach(function (w) { if (w.status === "preparing") { seen.wars[w.id] = "new"; } }); }
+    warsOf(fam).forEach(function (w) {
+      if (w.status !== "preparing" || startOf(w) <= now) { return; }
+      var had = seen.wars[w.id], attack = w.attackerId === fam.id, left = startOf(w) - now, foe = warFoe(fam, w);
+      if (!had) { seen.wars[w.id] = "new"; changed = true; speak(say(attack ? "vWarAttack" : "vWarDefend", { foe: foe, left: leftWords(left) })); }
+      if (had !== "soon" && left <= REMIND) {
+        seen.wars[w.id] = "soon"; changed = true;
+        var su = warSignups(fam)[attack ? "attack" : "defense"], reg = who2.me && su && su.ids[String(who2.me.id)];
+        speak(say("vWarSoon", { foe: foe, left: leftWords(left) }) + " " + (reg ? "You are registered." : "You are not registered yet."));
+      }
+    });
+    var mid = dayStart(now), day = dayKey(mid);
+    if (seen.day !== day && mid + DAY - now <= HOUR && who2.self && who2.self.today < FULL && last.at > now - 10 * 60000) {
+      seen.day = day; changed = true; speak(say("vReset", { ap: who2.self.today }));
+    }
+    if (changed) { save(s); }
+  }
+
+  // ----- A cover over the panel for the big moments. It follows the panel and goes away with a click. -----
+  function fxStage(kind, html, ms) {
+    fxStyle();
+    var el = document.createElement("div"), timers = [], loops = [], done = false, st = { el: el };
+    el.id = "syn-fx"; el.className = kind; el.innerHTML = html;
+    function fit() {
+      if (!box || !document.body.contains(box) || box.classList.contains("min")) { st.close(); return; }
+      var r = box.getBoundingClientRect(), h = Math.min(Math.max(r.height, 560), window.innerHeight - r.top - 4);
+      el.style.left = r.left + "px"; el.style.top = r.top + "px"; el.style.width = r.width + "px"; el.style.height = h + "px";
+      el.style.borderRadius = getComputedStyle(box).borderRadius;
+    }
+    st.later = function (t, f) { timers.push(setTimeout(f, t)); };
+    st.every = function (t, f) { var i = setInterval(f, t); loops.push(i); return i; };
+    st.close = function () {
+      if (done) { return; }
+      done = true; fxActive = null;
+      timers.forEach(clearTimeout); loops.forEach(clearInterval);
+      el.classList.add("out");
+      setTimeout(function () { el.remove(); }, 560);
+    };
+    el.addEventListener("click", st.close);
+    document.body.appendChild(el);
+    fxActive = st;
+    fit(); st.every(200, fit); st.later(ms, st.close);
+    return st;
+  }
+  function fxCount(st, node, to, ms) {
+    var from = performance.now(), i = st.every(40, function () {
+      var p = Math.min(1, (performance.now() - from) / ms), e = 1 - Math.pow(1 - p, 3);
+      node.textContent = fxNum(Math.round(to * e));
+      if (p >= 1) { clearInterval(i); }
+    });
+  }
+  // Sparks on a canvas: mode "fall" is confetti from above, mode "burst" is fireworks.
+  function fxSparks(parent, mode, ms) {
+    var cv = document.createElement("canvas"), cx = cv.getContext("2d"), ps = [], born = performance.now(), last2 = born, nextBurst = 0, cols = ["#ffd66e", "#fff3c4", "#ffb733", "#ff8fa3", "#8fd3ff", "#b7ff9e"];
+    cv.className = "fcv"; parent.appendChild(cv);
+    var W = cv.width = parent.clientWidth || 400, H = cv.height = parent.clientHeight || 600;
+    function burst(x, y) {
+      var col = cols[Math.floor(Math.random() * cols.length)];
+      for (var i = 0; i < 64; i++) {
+        var a = Math.random() * 6.283, v = 40 + Math.random() * 190;
+        ps.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: 90, life: 0.8 + Math.random() * 0.9, age: 0, c: Math.random() < 0.7 ? col : "#fff", s: 1.4 + Math.random() * 1.7, round: true });
+      }
+    }
+    function drop() {
+      ps.push({ x: Math.random() * W, y: -10, vx: -24 + Math.random() * 48, vy: 60 + Math.random() * 90, g: 26, life: 5, age: 0, c: cols[Math.floor(Math.random() * 3)], s: 2.5 + Math.random() * 3.2, r: Math.random() * 6, vr: -5 + Math.random() * 10 });
+    }
+    (function frame(now) {
+      if (!parent.isConnected || now - born > ms && !ps.length) { cv.remove(); return; }
+      var dt = Math.min(0.05, (now - last2) / 1000); last2 = now;
+      if (now - born < ms) {
+        if (mode === "burst" && now >= nextBurst) { burst(W * (0.18 + Math.random() * 0.64), H * (0.14 + Math.random() * 0.42)); nextBurst = now + 300 + Math.random() * 320; }
+        if (mode === "fall" && now - born > 500) { for (var d = 0; d < 2; d++) { drop(); } }
+      }
+      cx.clearRect(0, 0, W, H);
+      ps = ps.filter(function (p) {
+        p.age += dt; if (p.age > p.life || p.y > H + 12) { return false; }
+        p.vy += p.g * dt; p.vx *= mode === "burst" ? 0.985 : 1; p.vy *= mode === "burst" ? 0.985 : 1; p.x += p.vx * dt; p.y += p.vy * dt;
+        cx.globalAlpha = Math.min(1, (p.life - p.age) * 2.4); cx.fillStyle = p.c;
+        if (p.round) { cx.beginPath(); cx.arc(p.x, p.y, p.s, 0, 6.283); cx.fill(); }
+        else { p.r += p.vr * dt; cx.save(); cx.translate(p.x, p.y); cx.rotate(p.r); cx.fillRect(-p.s, -p.s * 0.45, p.s * 2, p.s * 0.9); cx.restore(); }
+        return true;
+      });
+      cx.globalAlpha = 1;
+      requestAnimationFrame(frame);
+    })(born);
+  }
+
+  // ----- Victory and defeat, the first time the panel is looked at after a war ended. s.fxWars = {war id: 1}. -----
+  function warInfo(fam, w, det) {
+    var attack = w.attackerId === fam.id, foe = warFoe(fam, w), o = { won: w.winnerId === fam.id, attack: attack, foe: foe, mvp: null, ours: 0, theirs: 0, duels: 0, dmg: 0, you: null, reward: "" };
+    if (det && det.replay) {
+      try {
+        var st = fighterStats(fam, w, det.replay), me = fxMe();
+        o.ours = st.us.length; o.theirs = st.them.length;
+        st.us.forEach(function (x) { o.duels += x.wins; o.dmg += x.dmg; if (me.me && (fighterId(x.f) === String(me.me.id) || x.name === me.name)) { o.you = x; } });
+        if (st.us[0] && (st.us[0].wins || st.us[0].dmg)) { o.mvp = st.us[0]; }
+      } catch (e) {}
+    }
+    var news = (fam.private && fam.private.events || []).filter(function (e) { return e && e.text && new Date(e.createdAt).getTime() >= startOf(w) && e.text.indexOf(foe) >= 0 && / defeated /.test(e.text); })[0];
+    if (news) { o.reward = news.text; }
+    return o;
+  }
+  function playWarFx(o) {
+    var win = o.won, h = win ? "<div class='frays'></div>" : "<div class='frain'></div><div class='frain r2'></div>";
+    h += "<div class='fshock'></div><div class='fin'><img class='fcrest' alt='' src='" + INTRO_LOGO + "'><div class='fstamp'>" + (win ? "VICTORY" : "DEFEAT") + "</div>"
+      + "<div class='ffoe'></div><div class='fquip'></div>"
+      + (o.ours ? "<div class='fnums'><div class='fnum'><b class='n1'>0</b><span>fighters</span></div><div class='fnum'><b class='n2'>0</b><span>duels won</span></div><div class='fnum'><b class='n3'>0</b><span>damage</span></div></div>" : "")
+      + (o.mvp ? "<div class='fmvp'><small>" + (win ? "MVP" : "BEST FIGHTER") + "</small><b class='fmn'></b><span class='fms'></span></div>" : "")
+      + (o.you ? "<div class='fyou'></div>" : "") + "</div><div class='fhint'>CLICK TO CLOSE</div>";
+    var st = fxStage(win ? "win" : "lose", h, 11000), q = function (c) { return st.el.querySelector(c); };
+    q(".ffoe").textContent = (o.attack ? "attack on " : "defense against ") + o.foe;
+    q(".fquip").textContent = say(win ? "fxWin" : "fxLoss");
+    if (o.mvp) { q(".fmn").textContent = o.mvp.name; q(".fms").textContent = o.mvp.wins + " duel" + (o.mvp.wins === 1 ? "" : "s") + " won · " + fxNum(o.mvp.dmg) + " damage"; }
+    if (o.you) { q(".fyou").textContent = "You: " + o.you.wins + " duel" + (o.you.wins === 1 ? "" : "s") + " won · " + fxNum(o.you.dmg) + " damage"; }
+    if (o.ours) { st.later(1450, function () { fxCount(st, q(".n1"), o.ours, 500); fxCount(st, q(".n2"), o.duels, 800); fxCount(st, q(".n3"), o.dmg, 1100); }); }
+    if (win) { st.later(600, function () { fxSparks(st.el, "fall", 9000); }); }
+    fxSound(win ? "victory" : "defeat");
+    return st;
+  }
+  function checkWarFx() {
+    if (!last || !last.fam.private) { return; }
+    var s = load(), fam = last.fam, wars = warsOf(fam), seen = s.fxWars;
+    if (!seen) { s.fxWars = {}; wars.forEach(function (w) { if (w.status === "finished") { s.fxWars[w.id] = 1; } }); save(s); return; } // first look stays quiet
+    var w = wars.filter(function (x) { return x.status === "finished" && !seen[x.id]; })[0];
+    if (!w) { return; }
+    seen[w.id] = 1; save(s); // saved first, so a second game tab leaves it
+    if (Date.now() - startOf(w) > 12 * HOUR) { return; } // old news
+    var go = function (det) {
+      var o = warInfo(fam, w, det), n = load();
+      speak(say(o.won ? "vWin" : "vLoss", { foe: o.foe }) + (o.mvp ? " " + say("vMvp", { name: o.mvp.name }) : ""));
+      if (fxOn(n, "warfx")) { fxQueue.push(function () { playWarFx(o); }); }
+    };
+    warDetail(w.id).then(go, function () { go(null); });
+  }
+
+  // ----- Fireworks for your own level-up and the family's. s.fxLv = {me, fam}. -----
+  function playFireworks(title, sub) {
+    var st = fxStage("fw", "<div class='fin'><div class='fstamp'></div><div class='fsub'></div></div>", 3500);
+    st.el.querySelector(".fstamp").textContent = title; st.el.querySelector(".fsub").textContent = sub;
+    fxSparks(st.el, "burst", 2600);
+    fxSound("fireworks");
+    return st;
+  }
+  function checkLevels() {
+    if (!last) { return; }
+    var s = load(), me = fxMe(), mine = me.self ? me.self.level : 0, fam = typeof last.fam.level === "number" ? last.fam.level : 0, lv = s.fxLv || {}, changed = !s.fxLv;
+    if (mine && lv.me && mine > lv.me) {
+      speak(say("vLevel", { lv: mine }));
+      if (fxOn(s, "fireworks")) { fxQueue.push(function () { playFireworks("LEVEL " + mine, me.name.toUpperCase()); }); }
+    }
+    if (fam && lv.fam && fam > lv.fam) {
+      speak(say("vFamLevel", { lv: fam }));
+      if (fxOn(s, "fireworks")) { fxQueue.push(function () { playFireworks("LEVEL " + fam, String(last.fam.name || "The family").toUpperCase()); }); }
+    }
+    if (mine && mine !== lv.me) { lv.me = mine; changed = true; }
+    if (fam && fam !== lv.fam) { lv.fam = fam; changed = true; }
+    if (changed) { s.fxLv = lv; save(s); }
+  }
+
+  // ----- Red Alert, the last 15 minutes before a battle: a pulsing panel, a countdown on top and one alarm. -----
+  var alertTest = null;
+  function alertNow(s) {
+    if (alertTest) { if (Date.now() < alertTest.at) { return alertTest; } alertTest = null; }
+    if (!last || !fxOn(s, "alert")) { return null; }
+    var nw = nextWar();
+    if (!nw || startOf(nw.w) - Date.now() > REMIND) { return null; }
+    var su = warSignups(last.fam)[nw.side.attack ? "attack" : "defense"], me = fxMe();
+    return { id: nw.w.id, foe: warFoe(last.fam, nw.w), at: startOf(nw.w), attack: nw.side.attack, reg: !!(me.me && su && su.ids[String(me.me.id)]) };
+  }
+  function alertHtml(s) {
+    var a = alertNow(s);
+    if (!a) { return ""; }
+    return "<div class='rabar'><span class='ratxt'>🚨 RED ALERT: " + esc(a.foe) + "<small>" + (a.reg ? "You're registered. Stay close." : "You're NOT registered! Family tab → Register") + "</small></span><span class='raleft'>" + clockText(Math.max(0, Math.ceil((a.at - Date.now()) / 1000))) + "</span></div>";
+  }
+  function updateAlert() {
+    var left = box && box.querySelector(".raleft");
+    if (!left) { return; }
+    var a = alertNow(load());
+    if (a) { left.textContent = clockText(Math.max(0, Math.ceil((a.at - Date.now()) / 1000))); }
+  }
+  setInterval(updateAlert, 1000);
+  function checkAlert() {
+    var s = load(), a = alertNow(s);
+    if (!a) { return; }
+    if (s.alertSaid === a.id) { return; }
+    s.alertSaid = a.id; save(s); // once per war
+    fxSound("alarm");
+    redraw();
+  }
+  function fxClasses(s) {
+    return (alertNow(s) ? " redalert" : "") + (fxOn(s, "ticker") && !s.min ? " hasticker" : "");
+  }
+
+  // ----- Threat radar in the War planner: the stronger a family, the closer to the middle and the bigger; ones you can attack now blink. -----
+  function radarHtml(s, list) {
+    if (!fxOn(s, "radar") || !list.length) { return ""; }
+    var dots = list.slice().sort(function (a, b) { return a.rank - b.rank; }).map(function (t, i) {
+      var c = t.ratio ? chance(s, t.ratio) : null, a = i * 137.5 * Math.PI / 180, r = 16 + 82 * Math.max(0, Math.min(1, (c == null ? 50 : c) / 100));
+      var col = t.busy ? "#7b8494" : c == null ? "#c8ccd4" : c >= 70 ? "#6fe07a" : c >= 40 ? "#ffd166" : "#ff5c6c", size = t.ratio ? Math.max(2.6, Math.min(7.5, 3.6 / t.ratio)) : 3.5;
+      return "<circle class='" + (t.busy ? "" : "rb") + "' style='animation-delay:" + (-i * 0.31).toFixed(2) + "s' cx='" + (120 + Math.cos(a) * r).toFixed(1) + "' cy='" + (120 + Math.sin(a) * r).toFixed(1) + "' r='" + size.toFixed(1) + "' fill='" + col + "' stroke='rgba(0,0,0,.5)' stroke-width='.6'"
+        + " title='" + esc("#" + t.rank + " " + t.name + (c != null ? ": ~" + c + "% win" : "") + (t.busy ? " (not attackable now)" : "")) + "'/>";
+    }).join("");
+    var rings = [38, 68, 98].map(function (r) { return "<circle cx='120' cy='120' r='" + r + "' fill='none' stroke='currentColor' stroke-opacity='.2'/>"; }).join("");
+    return "<div class='radar'><div class='rsw' style='animation-delay:" + (-(Date.now() % 4000) / 1000).toFixed(2) + "s'></div><img alt='' src='" + INTRO_LOGO + "'><svg viewBox='0 0 240 240'>" + rings + "<path d='M120 16V224M16 120H224' stroke='currentColor' stroke-opacity='.12'/>" + dots + "</svg></div>"
+      + "<div class='st' style='text-align:center;margin-top:0'>Threat radar: closer to the middle is more dangerous. Blinking means attackable now.</div>";
+  }
+
+  // ----- Breaking news along the panel's bottom edge, from the real numbers and the family's news. -----
+  var tickerEl = null;
+  function tickerItems(s) {
+    if (!last) { return []; }
+    var fam = last.fam, list = members(fam), out = [], joke = function () { return say("tickJoke"); }, base = gainsToday(s), now = Date.now();
+    if (base) {
+      var up = list.map(function (m) { return { m: m, n: base[m.id] == null ? 0 : m.level - base[m.id] }; }).sort(function (a, b) { return b.n - a.n; })[0];
+      if (up && up.n > 0) { out.push(up.m.name + " gains +" + up.n + " level" + (up.n === 1 ? "" : "s") + " today. " + joke()); }
+    }
+    var lead = list.slice().sort(function (a, b) { return b.today - a.today; })[0];
+    if (lead && lead.today > 0) { out.push(lead.name + " leads the family with " + fxNum(lead.today) + " activity today. " + joke()); }
+    out.push(list.filter(function (m) { return m.today >= FULL; }).length + " of " + list.length + " members at 100 today. " + untilReset() + " until the reset.");
+    var nw = nextWar();
+    if (nw) { out.push("War watch: battle " + (nw.side.attack ? "against " : "with ") + warFoe(fam, nw.w) + " in " + leftText(startOf(nw.w) - now) + "."); }
+    var p = fam.private;
+    if (p && p.treasury != null) { out.push("Treasury report: " + fxNum(p.treasury) + " gold in the vault. " + joke()); }
+    var eta = fam.nextLevelXp != null ? famEta(s, fam) : null;
+    if (eta) { out.push("Family level " + (fam.level + 1) + " expected in about " + etaWords(eta.ms) + "."); }
+    (p && p.events || []).filter(function (e) { return e && e.text && now - new Date(e.createdAt).getTime() < DAY; }).slice(0, 3).forEach(function (e) { out.push(e.text); });
+    return out;
+  }
+  function syncTicker() {
+    var s = load(), show = box && document.body.contains(box) && fxOn(s, "ticker") && !box.classList.contains("min") && !introStop && !fxActive && last;
+    if (!show) { if (tickerEl) { tickerEl.remove(); tickerEl = null; } return; }
+    fxStyle();
+    if (!tickerEl) {
+      tickerEl = document.createElement("div"); tickerEl.id = "syn-ticker";
+      tickerEl.innerHTML = "<b>BREAKING</b><div class='tkw'><span class='tkt'></span></div>";
+      document.body.appendChild(tickerEl);
+      fillTicker();
+      tickerEl.addEventListener("animationend", fillTicker);
+    }
+    var r = box.getBoundingClientRect(), cut = parseFloat(getComputedStyle(box).borderLeftWidth) || 0;
+    tickerEl.style.left = r.left + cut + "px"; tickerEl.style.width = r.width - cut * (box.classList.contains("dock") ? 1 : 2) + "px"; tickerEl.style.top = r.bottom - 24 - (box.classList.contains("dock") ? 0 : cut) + "px";
+    tickerEl.style.borderRadius = box.classList.contains("dock") ? "0" : "0 0 8px 8px";
+  }
+  function fillTicker() {
+    if (!tickerEl) { return; }
+    var t = tickerEl.querySelector(".tkt"), w = tickerEl.querySelector(".tkw"), items = tickerItems(load());
+    t.textContent = items.join("   ◆   ");
+    t.style.animation = "none"; void t.offsetWidth; t.style.animation = "";
+    var width = w.clientWidth || 300;
+    t.style.setProperty("--tkw", width + "px");
+    t.style.setProperty("--tk", Math.max(8, (width + t.offsetWidth) / 62).toFixed(1) + "s");
+  }
+
+  // ----- Most Wanted: a poster of last week's most active member in the family chat, once a week (s.posterSent = the week's Monday). -----
+  function posterData(s, from, days) {
+    var h = s.hist || {}, byId = {}, list = last ? members(last.fam) : [];
+    list.forEach(function (m) { byId[m.id] = { m: m, ap: 0, full: 0, first: null, end: null }; });
+    for (var i = 0; i < days; i++) {
+      var r = h[dayKey(from + i * DAY)];
+      if (!r) { continue; }
+      Object.keys(r).forEach(function (id) { var b = byId[id]; if (!b) { return; } b.ap += r[id].ap; if (r[id].ap >= FULL) { b.full++; } if (!b.first) { b.first = r[id]; } b.end = r[id]; });
+    }
+    var top = Object.keys(byId).map(function (id) { return byId[id]; }).sort(function (a, b) { return b.ap - a.ap; })[0];
+    if (!top || !top.ap) { return null; }
+    return { m: top.m, ap: top.ap, full: top.full, days: days, gain: top.first && top.end ? top.end.lv - top.first.lv : 0, from: from, family: last.fam.name || "The Family" };
+  }
+  function drawPoster(d) {
+    var cv = document.createElement("canvas"), W = cv.width = 720, H = cv.height = 1020, c = cv.getContext("2d");
+    function fit(text, y, font, size, min, width, color) {
+      var px = size;
+      do { c.font = font.replace("#", px); px -= 2; } while (c.measureText(text).width > width && px > min);
+      c.fillStyle = color || "#2c1a0c"; c.textAlign = "center"; c.fillText(text, W / 2, y);
+    }
+    function rule(y) { c.fillStyle = "#2c1a0c"; c.fillRect(70, y, W - 140, 3); c.fillRect(70, y + 6, W - 140, 1); }
+    var bg = c.createRadialGradient(W / 2, H / 2, 120, W / 2, H / 2, 680);
+    bg.addColorStop(0, "#efdcae"); bg.addColorStop(0.65, "#dcc07f"); bg.addColorStop(1, "#a97f42");
+    c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    for (var i = 0; i < 5200; i++) { c.fillStyle = "rgba(70,40,10," + (Math.random() * 0.1).toFixed(3) + ")"; c.fillRect(Math.random() * W, Math.random() * H, 1 + Math.random() * 2.2, 1 + Math.random() * 2.2); }
+    for (var k = 0; k < 7; k++) { // old stains
+      var x = Math.random() * W, y = Math.random() * H, rr = 30 + Math.random() * 90, st = c.createRadialGradient(x, y, rr * 0.2, x, y, rr);
+      st.addColorStop(0, "rgba(110,70,25,.0)"); st.addColorStop(0.85, "rgba(110,70,25,.12)"); st.addColorStop(1, "rgba(110,70,25,0)");
+      c.fillStyle = st; c.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+    }
+    c.strokeStyle = "#2c1a0c"; c.lineWidth = 5; c.strokeRect(26, 26, W - 52, H - 52); c.lineWidth = 1.5; c.strokeRect(36, 36, W - 72, H - 72);
+    c.textBaseline = "alphabetic";
+    fit("WANTED", 178, "400 #px Impact,'Arial Black',sans-serif", 176, 90, W - 120);
+    fit("FOR EXCESSIVE ACTIVITY", 228, "700 #px Georgia,serif", 31, 18, W - 130);
+    rule(248);
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = img.onerror = function () {
+        // The portrait frame, with the family's crest for a mugshot.
+        var fx = 160, fy = 270, fw = 400, fh = 360, ph = c.createRadialGradient(W / 2, fy + fh / 2, 40, W / 2, fy + fh / 2, 300);
+        ph.addColorStop(0, "#3b2a18"); ph.addColorStop(1, "#120c07");
+        c.fillStyle = ph; c.fillRect(fx, fy, fw, fh);
+        c.strokeStyle = "#2c1a0c"; c.lineWidth = 6; c.strokeRect(fx, fy, fw, fh);
+        if (img.width) { var ih = 318, iw = img.width * ih / img.height; c.drawImage(img, W / 2 - iw / 2, fy + (fh - ih) / 2, iw, ih); }
+        fit(String(d.m.name).toUpperCase(), 712, "400 #px Impact,'Arial Black',sans-serif", 74, 30, W - 130);
+        rule(734);
+        fit(fxNum(d.ap) + " ACTIVITY IN " + d.days + " DAY" + (d.days === 1 ? "" : "S"), 782, "700 #px Georgia,serif", 34, 18, W - 130);
+        fit(d.full + " DAYS AT 100" + (d.gain > 0 ? "  ·  +" + d.gain + " LEVEL" + (d.gain === 1 ? "" : "S") : "") + "  ·  LEVEL " + d.m.level + (d.m.pos ? "  ·  HONOR #" + d.m.pos : ""), 822, "700 #px Georgia,serif", 24, 14, W - 130);
+        rule(842);
+        fit("REWARD", 886, "400 #px Impact,'Arial Black',sans-serif", 38, 20, W - 130);
+        fit(d.reward, 926, "italic 700 #px Georgia,serif", 25, 13, W - 120);
+        fit(String(d.family).toUpperCase() + "  ·  " + shortDay(d.from) + " – " + shortDay(d.from + (d.days - 1) * DAY), 972, "700 #px Georgia,serif", 16, 10, W - 130, "#4a3018");
+        resolve(cv);
+      };
+      img.src = INTRO_LOGO;
+    });
+  }
+  function posterFor(s) { // last full week; by hand with no history for that, the week so far
+    var mid = dayStart(Date.now()), ws = weekStart(mid), d = posterData(s, ws - 7 * DAY, 7) || (mid > ws ? posterData(s, ws, (mid - ws) / DAY) : null);
+    if (d) { d.reward = say("posterReward"); }
+    return d;
+  }
+  function sendPoster(d, s, undo) {
+    return drawPoster(d).then(function (cv) {
+      return new Promise(function (r) { cv.toBlob(r, "image/png"); });
+    }).then(function (blob) {
+      var fd = new FormData(), users = [];
+      fd.append("payload_json", JSON.stringify({ username: say("asFamily"), allowed_mentions: { parse: [], users: [] }, content: say("posterLine", { who: who(s, d.m, users), ap: fxNum(d.ap) }) }));
+      fd.append("files[0]", blob, "most-wanted.png");
+      busy.poster = true;
+      return fetch(s.lvHook + "?wait=true", { method: "POST", body: fd }).then(function (r) {
+        if (!r.ok) { throw new Error("Discord said " + r.status); }
+        delete fails.poster;
+      });
+    }).catch(function (e) {
+      if (undo) { undo(); }
+      fails.poster = String(e && e.message || e); retryOf.poster = Date.now() + RETRY;
+    }).then(function () { busy.poster = false; redraw(); });
+  }
+  function autoPoster() {
+    var s = load(), mid = dayStart(Date.now()), week = dayKey(weekStart(mid) - 7 * DAY);
+    if (!s.lvHook || !fxOn(s, "poster") || !last || last.at < mid + GRACE || s.posterSent === week || !canPost("poster")) { return; }
+    var was = s.posterSent;
+    s.posterSent = week; save(s); // saved first, so a second game tab leaves it
+    if (!was) { return; } // the first week after updating stays quiet
+    var d = posterData(s, weekStart(mid) - 7 * DAY, 7);
+    if (!d) { return; }
+    d.reward = say("posterReward");
+    sendPoster(d, s, function () { var n = load(); n.posterSent = was; save(n); });
+  }
+  function previewPoster() {
+    var d = posterFor(load());
+    if (!d) { alert("There's no saved activity to make a poster from yet."); return; }
+    drawPoster(d).then(function (cv) {
+      if (fxActive) { fxActive.close(); }
+      fxStage("posterview", "<div class='fin'><img alt='Most Wanted' src='" + cv.toDataURL("image/png") + "'></div><div class='fhint'>CLICK TO CLOSE</div>", 30000);
+    });
+  }
+  function postPosterNow() {
+    var s = load(), d = posterFor(s);
+    if (!s.lvHook) { return; }
+    if (!d) { alert("There's no saved activity to make a poster from yet."); return; }
+    if (!confirm("Post the Most Wanted poster of " + d.m.name + " in the family chat?")) { return; }
+    sendPoster(d, s).then(function () { if (!fails.poster) { alert("Posted to the family chat."); } });
+  }
+
+  // ----- The secret code: up up down down left right left right B A. -----
+  var CODE = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"], codeAt = 0;
+  window.addEventListener("keydown", function (e) {
+    var k = e.key && e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    codeAt = k === CODE[codeAt] ? codeAt + 1 : k === CODE[0] ? 1 : 0;
+    if (codeAt === CODE.length) { codeAt = 0; playMatrix(); }
+  }, true);
+  function playMatrix() {
+    if (document.getElementById("syn-matrix")) { return; }
+    fxStyle();
+    var el = document.createElement("div"), names = (last ? members(last.fam).map(function (m) { return m.name; }) : ["THE SYNDICATE"]).join(" ").toUpperCase() || "THE SYNDICATE", done = false;
+    el.id = "syn-matrix";
+    el.innerHTML = "<canvas></canvas><div><img alt='' src='" + INTRO_LOGO + "'>ACCESS GRANTED<span class='mfam'></span></div>";
+    el.querySelector(".mfam").textContent = last && last.fam.name || "THE SYNDICATE";
+    document.body.appendChild(el);
+    var cv = el.firstChild, c = cv.getContext("2d"), W = cv.width = window.innerWidth, H = cv.height = window.innerHeight, S = 16, cols = Math.ceil(W / S), ys = [], at = [], prev = 0;
+    for (var i = 0; i < cols; i++) { ys.push(Math.random() * -60); at.push(Math.floor(Math.random() * names.length)); }
+    c.font = "700 " + S + "px ui-monospace,Consolas,monospace";
+    function stop() { if (done) { return; } done = true; el.style.transition = "opacity .5s"; el.style.opacity = 0; setTimeout(function () { el.remove(); }, 520); }
+    el.addEventListener("click", stop);
+    setTimeout(stop, 11000);
+    (function frame(now) {
+      if (done) { return; }
+      requestAnimationFrame(frame);
+      if (now - prev < 45) { return; }
+      prev = now;
+      c.fillStyle = "rgba(0,0,0,.075)"; c.fillRect(0, 0, W, H);
+      for (var x = 0; x < cols; x++) {
+        var ch = names.charAt(at[x] % names.length);
+        at[x]++;
+        c.fillStyle = "#d9ffe2"; c.fillText(ch, x * S, ys[x] * S);
+        c.fillStyle = "#17e356"; c.fillText(ch, x * S, (ys[x] - 1) * S);
+        ys[x] += 1;
+        if (ys[x] * S > H && Math.random() > 0.965) { ys[x] = 0; at[x] = Math.floor(Math.random() * names.length); }
+      }
+    })(0);
+    fxSound("matrix", false);
+    speak("Access granted.");
+  }
+
+  // ----- The Extras menu -----
+  function extrasHtml(s) {
+    var row = function (key, label, tip, tests) {
+      return "<div class='xrow' title='" + esc(tip) + "'><span class='xn'>" + label + "</span><button type='button' data-fx='" + key + "'>" + (fxOn(s, key) ? "On" : "Off") + "</button>" + (tests || "") + "</div>";
+    };
+    var test = function (k, label) { return "<button type='button' data-fxtest='" + k + "'>" + label + "</button>"; };
+    var intro = "<div class='xrow' title='Plays over the panel when the game loads. A click skips it.'><span class='xn'>🖥️ Startup animation</span><button type='button' data-introtoggle>" + (s.intro === false ? "Off" : "On") + "</button>" + test("intro", "Play") + "</div>";
+    var voices = voiceList(), current = voicePick(s), vol = typeof s.voiceVol === "number" ? s.voiceVol : 80;
+    var h = "<div class='setup'><b>Extras on this PC</b><div style='font-size:11.5px;color:var(--muted)'>Just for fun. Sound follows the game's volume slider.</div>"
+      + intro
+      + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
+      + (fxOn(s, "voice") && voices.length ? "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>"
+        + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>" : "")
+      + row("sound", "🔊 Effect sounds", "Startup hum, alarm, victory and defeat music, fireworks. Browsers may keep these quiet until your first click on the page.", test("sound", "Test"))
+      + row("alert", "🚨 Red Alert", "In the last 15 minutes before a battle the panel pulses red, with a countdown and one alarm.", test("alert", "Test"))
+      + row("warfx", "🏆 Victory and defeat screens", "A cinematic with the MVP, the first time you look after a war has ended.", test("win", "Win") + test("lose", "Loss"))
+      + row("fireworks", "🎆 Level-up fireworks", "When you, or the family, go up a level.", test("fireworks", "Test"))
+      + row("ticker", "📰 News ticker", "Breaking news from the real numbers along the bottom of the panel. Hover to pause it.")
+      + row("radar", "📡 Threat radar", "A radar of the scanned families at the top of the War planner.");
+    if (s.lvHook) { h += row("poster", "🤠 Most Wanted poster", "Last week's most active member, in the family chat every Monday.", test("posterview", "Preview") + test("postersend", "Post now")); }
+    return h + "</div>";
+  }
+  function fxTest(k) {
+    var me = fxMe(), name = me.name || "Your name";
+    if (k === "intro") { playIntro(); return; }
+    if (k === "voice") { speak(say("vGreet", { part: "evening", name: name }), true); return; }
+    if (k === "sound") { fxSound("boot", true); return; }
+    if (k === "alert") { alertTest = { id: "test", foe: "Test Family", at: Date.now() + 20000, reg: false }; fxSound("alarm", true); redraw(); setTimeout(redraw, 20500); return; }
+    if (k === "win" || k === "lose") {
+      if (fxActive) { fxActive.close(); }
+      var x = { name: name, wins: 4, dmg: 18420 };
+      playWarFx({ won: k === "win", attack: true, foe: "Test Family", mvp: x, you: x, ours: 12, theirs: 11, duels: 11, dmg: 164200, reward: "" });
+      return;
+    }
+    if (k === "fireworks") { if (fxActive) { fxActive.close(); } playFireworks("LEVEL UP", name.toUpperCase()); return; }
+    if (k === "posterview") { previewPoster(); return; }
+    if (k === "postersend") { postPosterNow(); }
+  }
+  // Runs on every tick. Big moments wait until someone can see them.
+  function fxTick() {
+    try {
+      checkVoice(); checkLevels(); checkWarFx(); checkAlert(); autoPoster();
+      if (fxQueue.length && !document.hidden && box && document.body.contains(box) && !box.classList.contains("min") && !introStop && !fxActive) { fxQueue.shift()(); }
+    } catch (e) {}
+    syncTicker();
   }
 
   // ===== Startup animation =====
@@ -4526,7 +5189,7 @@ function reporter() {
     // Follows the panel, which can still change size while the game loads.
     function fit() {
       if (!box || !document.body.contains(box) || box.classList.contains("min")) { finish(true); return; }
-      var r = box.getBoundingClientRect(), h = Math.max(r.height, Math.min(600, window.innerHeight - r.top - 4));
+      var r = box.getBoundingClientRect(), h = Math.min(Math.max(r.height, 600), window.innerHeight - r.top - 4);
       el.style.left = r.left + "px"; el.style.top = r.top + "px"; el.style.width = r.width + "px"; el.style.height = h + "px";
       var look = getComputedStyle(box);
       el.style.borderRadius = look.borderRadius;
@@ -4564,6 +5227,7 @@ function reporter() {
       setTimeout(function () { el.remove(); }, fast ? 300 : 700);
     }
     introStop = finish;
+    fxSound("boot");
     el.addEventListener("click", function () { finish(false); });
     document.body.appendChild(el);
     fit();
@@ -4658,6 +5322,7 @@ function reporter() {
     trackFamXp();
     learnDuels();
     rememberTimers();
+    fxTick();
     // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab, the bar and the duel page.
     if (closed || path !== PAGE && path !== BAR && path !== DUELS && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
     loadOwnFamily(path);
@@ -4666,7 +5331,7 @@ function reporter() {
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + memberFilter + trendId + area + personalTab + missionState() + (area === "personal" && personalTab === "missions" ? missionKey() : "") + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + showExtras + memberFilter + trendId + area + personalTab + missionState() + (area === "personal" && personalTab === "missions" ? missionKey() : "") + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
