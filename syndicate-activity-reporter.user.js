@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.21.0
+// @version      2.22.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.21.0";
+  var VERSION = "2.22.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.22.0": [
+      "Extras: effect sounds have their own volume slider, the voice uses names it can say (and Call me sets your own), and Windows pop-ups for your mission and the gang war, each with its own switch."
+    ],
     "2.21.0": [
       "New Extras menu beside Discord settings, with a switch and a test button for everything fun, per PC.",
       "JARVIS voice (off until you switch it on), startup and effect sounds, Red Alert before battles, victory and defeat screens, level-up fireworks, a news ticker and a threat radar in the War planner.",
@@ -204,7 +207,7 @@ function reporter() {
     if (!window.AudioNode || !window.AudioDestinationNode) { return; }
     var connect = AudioNode.prototype.connect;
     AudioNode.prototype.connect = function (dest) {
-      if (dest instanceof AudioDestinationNode) {
+      if (dest instanceof AudioDestinationNode && !dest.context.__synOwn) { // the panel's own sounds have their own slider
         var ctx = dest.context, g = ctx.__synVolume;
         if (!g) {
           g = ctx.__synVolume = ctx.createGain();
@@ -4307,12 +4310,15 @@ function reporter() {
       var vv = box.querySelector(".vv"); if (vv) { vv.textContent = volume ? volume + "%" : "Off"; }
       return;
     }
+    if (t.hasAttribute("data-fxvol")) { if (fxMaster) { fxMaster.gain.value = fxGain(+t.value); } return; }
     if (t.hasAttribute("data-msearch")) { memberQuery = t.value; applyMemberFilter(); }
   }
   function onChange(ev) {
     var t = ev.target, k = t && t.getAttribute && t.getAttribute("data-rf");
     if (t && t.hasAttribute && t.hasAttribute("data-volslider")) { var sv = load(); sv.volume = +t.value; save(sv); setVolume(sv.volume); t.blur(); redraw(); return; }
-    if (t && t.hasAttribute && t.hasAttribute("data-voicepick")) { var sp = load(); sp.voiceName = t.value; save(sp); speak(say("vGreet", { part: "evening", name: fxMe().name || "boss" }), true); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-fxvol")) { var sf = load(); sf.fxVol = +t.value; save(sf); if (fxMaster) { fxMaster.gain.value = fxGain(sf.fxVol); } t.blur(); fxSound("ping", true); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-voicecall")) { var sc = load(); sc.voiceCall = t.value.trim(); save(sc); t.blur(); speak(say("vGreet", { part: "evening", name: spokenName(fxMe().name) }), true); redraw(); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-voicepick")) { var sp = load(); sp.voiceName = t.value; save(sp); speak(say("vGreet", { part: "evening", name: spokenName(fxMe().name) }), true); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-voicevol")) { var sq = load(); sq.voiceVol = +t.value; save(sq); t.blur(); speak("Volume set.", true); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-ra")) { var s0 = load(); s0.recruitAlertMin = Math.max(0, parseInt(t.value, 10) || 0); save(s0); t.blur(); redraw(); return; }
     if (!k) { return; }
@@ -4386,7 +4392,11 @@ function reporter() {
     if (t.hasAttribute("data-rsort")) { var rs = recruitFilter(s); rs.sort = t.getAttribute("data-rsort"); s.recruitFilter = rs; save(s); redraw(); return; }
     if (t.hasAttribute("data-introtoggle")) { s.intro = s.intro === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-extras")) { showExtras = !showExtras; redraw(); return; }
-    if (t.hasAttribute("data-fx")) { var fk = t.getAttribute("data-fx"); s.fx = s.fx || {}; s.fx[fk] = !fxOn(s, fk); save(s); redraw(); return; }
+    if (t.hasAttribute("data-fx")) {
+      var fk = t.getAttribute("data-fx"), flip = function () { var n = load(); n.fx = n.fx || {}; n.fx[fk] = !fxOn(n, fk); save(n); redraw(); };
+      if (/^pop/.test(fk) && !fxOn(s, fk)) { askPopups(flip); } else { flip(); }
+      return;
+    }
     if (t.hasAttribute("data-fxtest")) { fxTest(t.getAttribute("data-fxtest")); return; }
     if (t.hasAttribute("data-overtoggle")) { s.overtakes = s.overtakes === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-ratoggle")) { s.recruitAlert = s.recruitAlert === false; save(s); redraw(); return; }
@@ -4468,7 +4478,7 @@ function reporter() {
   // ===== Extras: effects, sounds and the voice =====
   // Just for fun, each with a switch per PC in the panel's Extras (s.fx = {name: true or false}). The voice starts switched off, since a
   // talking panel shouldn't surprise anyone; the rest starts on. Nothing here posts to Discord except the Most Wanted poster.
-  var FX_ON = { sound: true, voice: false, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
+  var FX_ON = { popMission: false, popGang: false, sound: true, voice: false, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
   var showExtras = false, fxQueue = [], fxActive = null, fxStyleEl = null;
   function fxOn(s, k) { return s.fx && typeof s.fx[k] === "boolean" ? s.fx[k] : FX_ON[k]; }
   function fxStyle() {
@@ -4542,10 +4552,17 @@ function reporter() {
   function fxNum(v) { return (+v || 0).toLocaleString("en-US"); }
 
   // ----- Sounds, made in the browser. They go through the volume slider like the game's own sounds. -----
-  var fxCtx = null;
+  var fxCtx = null, fxMaster = null;
+  function fxVolOf(s) { return typeof s.fxVol === "number" ? s.fxVol : 70; }
+  function fxGain(v) { return (v / 100) * (v / 100) * 2; } // squared like the game's slider, and 70% is about full strength
   function fxAudio() { // resolves with a running sound context, or nothing if the browser wants a click on the page first
     if (!window.AudioContext) { return Promise.resolve(null); }
-    try { if (!fxCtx) { fxCtx = new AudioContext(); } } catch (e) { return Promise.resolve(null); }
+    try {
+      if (!fxCtx) {
+        fxCtx = new AudioContext(); fxCtx.__synOwn = true;
+        fxMaster = fxCtx.createGain(); fxMaster.gain.value = fxGain(fxVolOf(load())); fxMaster.connect(fxCtx.destination);
+      }
+    } catch (e) { return Promise.resolve(null); }
     if (fxCtx.state === "running") { return Promise.resolve(fxCtx); }
     return Promise.race([fxCtx.resume().catch(function () {}), new Promise(function (r) { setTimeout(r, 200); })]).then(function () { return fxCtx.state === "running" ? fxCtx : null; });
   }
@@ -4556,9 +4573,10 @@ function reporter() {
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.g || 0.08, t + Math.min(0.04, o.d / 3)); g.gain.exponentialRampToValueAtTime(0.0001, end);
     n.connect(g);
     if (o.lp) { var l = c.createBiquadFilter(); l.type = "lowpass"; l.frequency.value = o.lp; g.connect(l); out = l; }
-    out.connect(c.destination); n.start(t); n.stop(end + 0.02);
+    out.connect(fxMaster); n.start(t); n.stop(end + 0.02);
   }
   var FX_SOUNDS = {
+    ping: function (c) { fxTone(c, { f: 660, d: 0.12, g: 0.09, type: "triangle" }); fxTone(c, { f: 880, d: 0.2, at: 0.11, g: 0.09, type: "triangle" }); },
     boot: function (c) {
       fxTone(c, { f: 48, to: 120, d: 1.9, g: 0.13, type: "sawtooth", lp: 300 }); fxTone(c, { f: 96, to: 240, d: 1.9, at: 0.15, g: 0.06, lp: 900 });
       [0.55, 0.85, 1.15, 1.45].forEach(function (at, i) { fxTone(c, { f: 660 + i * 220, d: 0.09, at: at, g: 0.05, type: "square", lp: 2400 }); });
@@ -4590,6 +4608,17 @@ function reporter() {
 
   // ----- The voice. Browsers only let a page speak after a click on it, so what's said before that waits for the first click, for up to a minute. -----
   var voiceWaiting = null, voiceGreeted = false, voiceMission = null;
+  // Game names aren't always sayable, so these are spelled how they sound; numbers at the end of a name are left out. Everyone can set their own in Extras.
+  var SPOKEN = { albidzn: "Albi" };
+  function spokenName(name) {
+    if (!name) { return "boss"; }
+    var s = load(), mine = fxMe().name;
+    if (name === mine && s.voiceCall) { return s.voiceCall; }
+    var known = SPOKEN[String(name).toLowerCase()];
+    if (known) { return known; }
+    var plain = String(name).replace(/[_.-]+/g, " ").replace(/\s*\d+$/, "").trim();
+    return plain.length >= 3 ? plain : name;
+  }
   function voiceList() {
     if (!window.speechSynthesis) { return []; }
     var all = speechSynthesis.getVoices() || [], en = all.filter(function (v) { return /^en/i.test(v.lang); });
@@ -4639,7 +4668,7 @@ function reporter() {
       var reloaded = 0; try { reloaded = +sessionStorage.getItem("syn-reload") || 0; } catch (e) {}
       if (!document.hidden && Date.now() - reloaded > 2 * 60000) {
         var hour = new Date().getHours(), part = hour < 5 ? "evening" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening", nw0 = nextWar();
-        speak(say("vGreet", { part: part, name: who2.name }) + (nw0 ? " " + say("vGreetWar", { foe: warFoe(last.fam, nw0.w), left: leftWords(startOf(nw0.w) - Date.now()) }) : ""));
+        speak(say("vGreet", { part: part, name: spokenName(who2.name) }) + (nw0 ? " " + say("vGreetWar", { foe: warFoe(last.fam, nw0.w), left: leftWords(startOf(nw0.w) - Date.now()) }) : ""));
       }
     }
     var run = missionRunning();
@@ -4775,7 +4804,7 @@ function reporter() {
     if (Date.now() - startOf(w) > 12 * HOUR) { return; } // old news
     var go = function (det) {
       var o = warInfo(fam, w, det), n = load();
-      speak(say(o.won ? "vWin" : "vLoss", { foe: o.foe }) + (o.mvp ? " " + say("vMvp", { name: o.mvp.name }) : ""));
+      speak(say(o.won ? "vWin" : "vLoss", { foe: o.foe }) + (o.mvp ? " " + say("vMvp", { name: spokenName(o.mvp.name) }) : ""));
       if (fxOn(n, "warfx")) { fxQueue.push(function () { playWarFx(o); }); }
     };
     warDetail(w.id).then(go, function () { go(null); });
@@ -5045,6 +5074,46 @@ function reporter() {
     speak("Access granted.");
   }
 
+  // ----- Windows pop-ups for your mission and the gang war, through the browser's notifications. They need the browser's permission, asked when one is switched on.
+  // s.popSaid = {what: when it's due while waiting, minus that once shown}, so a reload or a second tab doesn't show it twice. Something that came due over 10 minutes ago is old news.
+  var popNote = "";
+  function askPopups(then) {
+    if (!window.Notification) { popNote = "This browser doesn't support pop-ups."; redraw(); return; }
+    if (Notification.permission === "granted") { popNote = ""; then(); return; }
+    Promise.resolve(Notification.requestPermission()).then(function (p) {
+      if (p === "granted") { popNote = ""; then(); return; }
+      popNote = "The browser is blocking pop-ups for this site. Click the icon left of the address, allow Notifications, then try again.";
+      redraw();
+    }, function () { popNote = "The browser didn't allow pop-ups."; redraw(); });
+  }
+  function showPopup(tag, title, body, href) {
+    try {
+      var n = new Notification(title, { body: body, icon: INTRO_LOGO, tag: "syn-" + tag });
+      n.onclick = function () { window.focus(); gameNavigate(href); n.close(); };
+    } catch (e) { popNote = "The browser wouldn't show a pop-up: " + (e && e.message || e); }
+  }
+  function checkPopups() {
+    var s = load();
+    if (!window.Notification || Notification.permission !== "granted" || !client || !(fxOn(s, "popMission") || fxOn(s, "popGang"))) { return; }
+    var said = s.popSaid = s.popSaid || {}, changed = false, now = Date.now();
+    function due(key, end, title, body, href) {
+      if (!end) { return; }
+      if (end > now) { if (said[key] !== end) { said[key] = end; changed = true; } return; }
+      if (said[key] !== end) { return; } // never seen counting down here, so it isn't news
+      said[key] = -end; changed = true;
+      if (now - end < 10 * 60000) { showPopup(key, title, body, href); }
+    }
+    if (fxOn(s, "popMission")) {
+      var q = client.getQueryCache().find({ queryKey: ["getActiveQuest"] }), d = q && q.state.data, run = missionRunning();
+      if (run && d.startedAt) { due("mission", new Date(d.startedAt).getTime() + d.data.seconds * 1000, "🎯 Mission ready", (run.name ? run.name + " is done. " : "Your mission is done. ") + "Time for the next job.", BAR); }
+    }
+    if (fxOn(s, "popGang")) {
+      var all = s.cityTimers || {};
+      Object.keys(CITY_NAMES).forEach(function (c) { due("gang" + c, all[c] && all[c].gang, "🗺️ Gang war ready", "You can fight again in " + CITY_NAMES[c] + ".", GANGWAR); });
+    }
+    if (changed) { save(s); }
+  }
+
   // ----- The Extras menu -----
   function extrasHtml(s) {
     var row = function (key, label, tip, tests) {
@@ -5053,12 +5122,17 @@ function reporter() {
     var test = function (k, label) { return "<button type='button' data-fxtest='" + k + "'>" + label + "</button>"; };
     var intro = "<div class='xrow' title='Plays over the panel when the game loads. A click skips it.'><span class='xn'>🖥️ Startup animation</span><button type='button' data-introtoggle>" + (s.intro === false ? "Off" : "On") + "</button>" + test("intro", "Play") + "</div>";
     var voices = voiceList(), current = voicePick(s), vol = typeof s.voiceVol === "number" ? s.voiceVol : 80;
-    var h = "<div class='setup'><b>Extras on this PC</b><div style='font-size:11.5px;color:var(--muted)'>Just for fun. Sound follows the game's volume slider.</div>"
+    var h = "<div class='setup'><b>Extras on this PC</b><div style='font-size:11.5px;color:var(--muted)'>Just for fun.</div>"
       + intro
       + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
       + (fxOn(s, "voice") && voices.length ? "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>"
-        + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>" : "")
+        + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>"
+        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" : "")
+      + row("popMission", "🔔 Pop-up: mission ready", "A Windows pop-up when your mission is done, also when the game is in the background. Click it to open the bar. The game has to be open.", test("popMission", "Test"))
+      + row("popGang", "🔔 Pop-up: gang war ready", "A Windows pop-up when you can fight again. Each city counts once you've opened its gang war map. The game has to be open.", test("popGang", "Test"))
+      + (popNote ? "<div class='st bad'>" + esc(popNote) + "</div>" : "")
       + row("sound", "🔊 Effect sounds", "Startup hum, alarm, victory and defeat music, fireworks. Browsers may keep these quiet until your first click on the page.", test("sound", "Test"))
+      + (fxOn(s, "sound") ? "<div class='xrow'><span class='xn'>Effects volume</span><input type='range' min='0' max='100' step='1' value='" + fxVolOf(s) + "' data-fxvol></div>" : "")
       + row("alert", "🚨 Red Alert", "In the last 15 minutes before a battle the panel pulses red, with a countdown and one alarm.", test("alert", "Test"))
       + row("warfx", "🏆 Victory and defeat screens", "A cinematic with the MVP, the first time you look after a war has ended.", test("win", "Win") + test("lose", "Loss"))
       + row("fireworks", "🎆 Level-up fireworks", "When you, or the family, go up a level.", test("fireworks", "Test"))
@@ -5070,8 +5144,10 @@ function reporter() {
   function fxTest(k) {
     var me = fxMe(), name = me.name || "Your name";
     if (k === "intro") { playIntro(); return; }
-    if (k === "voice") { speak(say("vGreet", { part: "evening", name: name }), true); return; }
+    if (k === "voice") { speak(say("vGreet", { part: "evening", name: spokenName(me.name) }), true); return; }
     if (k === "sound") { fxSound("boot", true); return; }
+    if (k === "popMission") { askPopups(function () { redraw(); showPopup("test", "🎯 Mission ready", "This is a test. Time for the next job.", BAR); }); return; }
+    if (k === "popGang") { askPopups(function () { redraw(); showPopup("test", "🗺️ Gang war ready", "This is a test. You can fight again.", GANGWAR); }); return; }
     if (k === "alert") { alertTest = { id: "test", foe: "Test Family", at: Date.now() + 20000, reg: false }; fxSound("alarm", true); redraw(); setTimeout(redraw, 20500); return; }
     if (k === "win" || k === "lose") {
       if (fxActive) { fxActive.close(); }
@@ -5086,7 +5162,7 @@ function reporter() {
   // Runs on every tick. Big moments wait until someone can see them.
   function fxTick() {
     try {
-      checkVoice(); checkLevels(); checkWarFx(); checkAlert(); autoPoster();
+      checkVoice(); checkLevels(); checkWarFx(); checkAlert(); autoPoster(); checkPopups();
       if (fxQueue.length && !document.hidden && box && document.body.contains(box) && !box.classList.contains("min") && !introStop && !fxActive) { fxQueue.shift()(); }
     } catch (e) {}
     syncTicker();
