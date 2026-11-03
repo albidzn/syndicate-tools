@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.14.2
+// @version      2.15.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.14.2";
+  var VERSION = "2.15.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.15.0": [
+      "Activity tab and leaderboard: about how long until the next family level. It measures the family's real XP gain, and uses the average AP as a rough estimate until it has 6 hours of that."
+    ],
     "2.14.2": [
       "Duels: the honor column now says plainly what it is: what a typical win pays (~). The honor gap didn't predict real wins. Press Learn from mail once more: it reads more fights and keeps more about each."
     ],
@@ -669,8 +672,51 @@ function reporter() {
   function progressLine(fam) {
     var p = famProgress(fam);
     if (!p) { return ""; }
-    var n = Math.round(p.pct / 10);
-    return "🏰 **Family level " + p.level + "**" + (p.max ? " · max level" : " · " + new Array(n + 1).join("▰") + new Array(11 - n).join("▱") + " " + p.pct + "% to level " + (p.level + 1));
+    var n = Math.round(p.pct / 10), eta = famEta(load(), fam);
+    return "🏰 **Family level " + p.level + "**" + (p.max ? " · max level" : " · " + new Array(n + 1).join("▰") + new Array(11 - n).join("▱") + " " + p.pct + "% to level " + (p.level + 1) + (eta ? " · about " + etaWords(eta.ms) : ""));
+  }
+  // Time to the next family level. The game doesn't say what family XP comes from, so it's measured: s.famXp keeps the family's XP
+  // every half hour for a week, and the pace is the change since the oldest of those. Until there are 6 hours of that, the average
+  // AP per day from the history stands in, assuming 1 AP is 1 XP, and is marked as a rough estimate.
+  var FAM_XP_EVERY = 30 * 60000, FAM_XP_KEEP = 7 * 864e5, FAM_XP_MIN = 6 * 36e5;
+  function trackFamXp() {
+    var fam = last && last.fam;
+    if (!fam || typeof fam.xp !== "number") { return; }
+    var s = load(), log = s.famXp || [], now = Date.now(), end = log[log.length - 1];
+    if (end && now - end.t < FAM_XP_EVERY) { return; }
+    s.famXp = log.filter(function (x) { return now - x.t <= FAM_XP_KEEP; }).concat([{ t: now, xp: fam.xp }]);
+    save(s);
+  }
+  function famEta(s, fam) {
+    if (typeof fam.xp !== "number" || fam.nextLevelXp == null) { return null; }
+    var left = fam.nextLevelXp - fam.xp, now = Date.now(), first = (s.famXp || []).filter(function (x) { return now - x.t <= FAM_XP_KEEP; })[0];
+    if (left <= 0) { return null; }
+    if (first && now - first.t >= FAM_XP_MIN && fam.xp > first.xp) {
+      var rate = (fam.xp - first.xp) / (now - first.t);
+      return { left: left, ms: left / rate, perDay: rate * 864e5, how: now - first.t >= 864e5 ? "measured" : "early", since: first.t };
+    }
+    // Finished days only: today isn't over.
+    var h = s.hist || {}, mid = Math.floor(now / 864e5) * 864e5, totals = [];
+    for (var i = 1; i <= 7; i++) {
+      var r = h[new Date(mid - i * 864e5).toISOString().slice(0, 10)];
+      if (r) { totals.push(Object.keys(r).reduce(function (a, id) { return a + (r[id].ap || 0); }, 0)); }
+    }
+    if (!totals.length) { return null; }
+    var avg = totals.reduce(function (a, v) { return a + v; }, 0) / totals.length;
+    return avg > 0 ? { left: left, ms: left / avg * 864e5, perDay: avg, how: "rough", days: totals.length } : null;
+  }
+  function etaWords(ms) {
+    var h = ms / 36e5;
+    return h >= 48 ? Math.round(h / 24) + " days" : h >= 2 ? Math.round(h) + " hours" : "1 hour";
+  }
+  function famEtaHtml(s, fam) {
+    if (typeof fam.level !== "number") { return ""; }
+    if (fam.nextLevelXp == null) { return "<div class='lvline'>🏰 Family level <b>" + fam.level + "</b> · max level</div>"; }
+    var eta = famEta(s, fam), to = fam.level + 1;
+    if (!eta) { return "<div class='lvline' title='Starts showing a time after a day of history, or 6 hours of watching the family XP.'>🏰 Level <b>" + fam.level + "</b> → " + to + (typeof fam.xp === "number" ? " · <b>" + Math.max(0, fam.nextLevelXp - fam.xp).toLocaleString("en-US") + "</b> XP to go" : "") + "</div>"; }
+    var tip = eta.how === "rough" ? "Rough: assumes 1 AP is 1 XP, from an average of " + Math.round(eta.perDay).toLocaleString("en-US") + " AP a day over the last " + eta.days + " day" + (eta.days === 1 ? "" : "s") + ". It switches to the real XP gain after 6 hours of watching it."
+      : "The family gained about " + Math.round(eta.perDay).toLocaleString("en-US") + " XP a day since " + new Date(eta.since).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) + (eta.how === "early" ? ". Under a day of data so far, so this still swings with the time of day." : ".");
+    return "<div class='lvline' title='" + esc(tip) + "'>🏰 Level <b>" + fam.level + "</b> → " + to + " · <b>" + eta.left.toLocaleString("en-US") + "</b> XP to go · about <b>" + leftText(eta.ms) + "</b>" + (eta.how === "measured" ? "" : " <span class='idle'>(rough)</span>") + "</div>";
   }
   function checkFamilyLevel() {
     var s = load(), lv = last && last.fam.level;
@@ -2347,7 +2393,7 @@ function reporter() {
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
     + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
     + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID table.mem td.tg{position:relative}#ID button.awaybtn{position:absolute;left:-16px;top:50%;transform:translateY(-50%);border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
-    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
+    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID .lvline{margin:0 0 6px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted);cursor:help}#ID .lvline b{color:var(--fg);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     + "#ID .tabs{display:flex;gap:4px;margin:8px -14px 4px;padding:6px 14px;border-bottom:1px solid var(--strong);position:sticky;top:-12px;z-index:2;background:var(--bg)}"
@@ -3293,7 +3339,7 @@ function reporter() {
         + "<div class='stat'><b>" + (start ? "+" + gained : "–") + "</b><span>levels today</span></div>"
         + "<div class='stat' title='" + esc(warTip) + "'><b class='wk'><i>" + ATK_ICON + "</i>" + (nA == null ? "–" : nA) + " <i>" + DEF_ICON + "</i>" + (nD == null ? "–" : nD) + "</b><span>war sign-ups</span></div>"
         + "<div class='stat'><b>" + untilReset() + "</b><span>until reset</span></div></div>";
-      html += boostHtml(s) + remindHtml(s, list, su);
+      html += famEtaHtml(s, last.fam) + boostHtml(s) + remindHtml(s, list, su);
       html += "<div class='msrow'><input type='search' class='msearch' data-msearch placeholder='Search members…' value='" + esc(memberQuery) + "' autocomplete='off'><span class='seg'>"
         + Object.keys(SORTS).map(function (k) { return "<button type='button' data-sort='" + k + "' class='" + (k === sortBy ? "on" : "") + "'>" + SORTS[k] + "</button>"; }).join("") + "</span></div>";
       var flags = {};
@@ -3782,6 +3828,7 @@ function reporter() {
     checkStuck();
     tabTitle();
     readMissions();
+    trackFamXp();
     learnDuels();
     rememberTimers();
     // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab, the bar and the duel page.
