@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.16.3
+// @version      2.16.4
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.16.3";
+  var VERSION = "2.16.4";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.16.4": [
+      "Activity tab: new No Discord filter shows how many and which members aren't linked, sorted like the rest of the list."
+    ],
     "2.16.3": [
       "Duels: counts your attacks per player and hides anyone you've attacked 3 times today (4 with a Spy). Counting starts with this version."
     ],
@@ -3187,17 +3190,17 @@ function reporter() {
     save(s); redraw();
   }
   // Member search and quick filter on the Activity tab (kept until the Family tab is left). Rows carry their filter flags:
-  // u = under 100 today, r = can fight but isn't registered for a planned war, o = online, a = away.
+  // u = under 100 today, r = can fight but isn't registered for a planned war, o = online, a = away, d = not linked to Discord.
   var memberQuery = "", memberFilter = "", trendId = "";
   function nameMatch(lower) { var q = memberQuery.trim().toLowerCase(); return !q || lower.indexOf(q) >= 0; }
   function rowShown(lower, flags) { return nameMatch(lower) && (!memberFilter || flags.indexOf(memberFilter) >= 0); }
   function memberFlags(s, m, su) {
     var miss = ["attack", "defense"].some(function (k) { return su[k] && unregistered(s, [m], su[k]).length; });
-    return (m.today < FULL ? "u" : "") + (miss ? "r" : "") + (m.online ? "o" : "") + (awayUntil(s, m.id) ? "a" : "");
+    return (m.today < FULL ? "u" : "") + (miss ? "r" : "") + (m.online ? "o" : "") + (awayUntil(s, m.id) ? "a" : "") + (s.links && !s.links[m.id] ? "d" : "");
   }
-  function filterHtml(list, flags, su) {
+  function filterHtml(s, list, flags, su) {
     var count = function (f) { return list.filter(function (m) { return flags[m.id].indexOf(f) >= 0; }).length; };
-    return "<div class='mfilters'>" + [["", "All", list.length], ["u", "Under 100", count("u")], ["r", "Not registered", count("r")], ["o", "Online", count("o")], ["a", "Away", count("a")]].map(function (o) {
+    return "<div class='mfilters'>" + [["", "All", list.length], ["u", "Under 100", count("u")], ["r", "Not registered", count("r")], ["o", "Online", count("o")], ["a", "Away", count("a")]].concat(s.links && Object.keys(s.links).length ? [["d", "No Discord", count("d")]] : []).map(function (o) {
       var off = o[0] === "r" && !su.attack && !su.defense;
       return "<button type='button' data-mfilter='" + o[0] + "'" + (memberFilter === o[0] ? " class='on'" : "") + (off ? " disabled title='No war planned'" : "") + ">" + o[1] + " " + o[2] + "</button>";
     }).join("") + "</div>";
@@ -3457,7 +3460,7 @@ function reporter() {
         + Object.keys(SORTS).map(function (k) { return "<button type='button' data-sort='" + k + "' class='" + (k === sortBy ? "on" : "") + "'>" + SORTS[k] + "</button>"; }).join("") + "</span></div>";
       var flags = {};
       list.forEach(function (m) { flags[m.id] = memberFlags(s, m, su); });
-      html += filterHtml(list, flags, su);
+      html += filterHtml(s, list, flags, su);
       var key = sortBy === "levels" ? function (m) { return m.levels || 0; } : function (m) { return m[sortBy]; };
       list.sort(function (a, b) { return key(b) - key(a) || b.today - a.today || b.level - a.level; });
       var th = function (k, label, tip) { return "<th" + (k === sortBy ? " class='on'" : "") + (tip ? " title='" + tip + "'" : "") + ">" + label + "</th>"; };
