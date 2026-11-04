@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.23.0
+// @version      2.24.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.23.0";
+  var VERSION = "2.24.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.24.0": [
+      "Ranks tab: Weakest members, for when the family needs a seat. Ranked by activity over 30 days, Discord link and missed wars, with the seat count. Recruits points to it too."
+    ],
     "2.23.0": [
       "Extras: Auto-join wars signs you up for attacks and defences you may fight in, as soon as the panel sees them. Each player switches it on for themselves, and the game has to be open at some point in the 10 hours before the battle."
     ],
@@ -2299,6 +2302,8 @@ function reporter() {
   function recruitHtml(s) {
     var r = s.recruits, f = recruitFilter(s), list = recruitList(s), h = "";
     h += "<div class='st'>Players in the ranking marked <b>looking for a family</b>. Click a name to copy it.</div>";
+    var wk = weakest(s).rows.slice(0, 2), seats = seatsLine(last.fam);
+    if (seats || wk.length) { h += "<div class='st'>" + esc(seats) + (wk.length ? " Weakest now: " + wk.map(function (r) { return "<b>" + esc(r.m.name) + "</b>"; }).join(", ") + ". <button type='button' data-ranks>See why</button>" : "") + "</div>"; }
     if (recruiting && recruiting.running) { h += "<div class='st wait'>" + esc(recruiting.step) + "</div>"; }
     else if (recruiting && recruiting.error) { h += "<div class='st bad'>Scan failed: " + esc(recruiting.error) + ".</div>"; }
     h += "<div class='row filters'><label>Level <input type='number' min='0' data-rf='min' value='" + (f.min || "") + "' placeholder='min'></label>"
@@ -2402,11 +2407,66 @@ function reporter() {
     var days = keys.filter(function (k) { return h[k]; }).length, wars = Object.keys(att).reduce(function (x, id) { return Math.max(x, att[id].wars); }, 0);
     return { ready: ready, check: check, why: why, days: days, wars: wars };
   }
+  // Who to replace when the family needs a seat. Weakness is out of 100: 60 for activity, 20 for not being linked to Discord, 20 for missed wars.
+  // Activity is two thirds reaching 100 (each finished day counts up to 100, and the last 7 days weigh as much as the whole 30, so someone who has recently
+  // stopped shows up) and one third the average points against the family's median, because most members pass 100 and it would otherwise rank them alike. Without Discord links on this PC (or with too few wars) those parts aren't counted, and the score is scaled back up to 100.
+  // Left out: the Godfather and Counselors, members marked away, and anyone with under 3 finished days to judge.
+  var WEAK_DAYS = 30, WEAK_RECENT = 7, WEAK_MIN_DAYS = 3, WEAK_MIN_WARS = 3, WEAK_SHOW = 5, weakAll = false;
+  function weakest(s) {
+    var mid = dayStart(Date.now()), list = members(last.fam), att = attendance(s, list), linked = s.links && Object.keys(s.links).length > 0, out = { rows: [], away: 0, young: 0 };
+    list.forEach(function (m) {
+      if (m.rank === "godfather" || m.rank === "counselor") { return; }
+      if (awayUntil(s, m.id)) { out.away++; return; }
+      var days = 0, full = 0, zero = 0, sum = 0, capped = 0, recent = 0, recentDays = 0;
+      for (var i = 1; i <= WEAK_DAYS; i++) {
+        var t = mid - i * DAY, r = s.hist && s.hist[dayKey(t)], ap = r && r[m.id] ? r[m.id].ap : i === 1 ? m.yesterday : null;
+        if (ap == null || m.joinedAt > t) { continue; }
+        ap = +ap || 0;
+        days++; sum += ap; capped += Math.min(ap, FULL);
+        if (ap >= FULL) { full++; }
+        if (!ap) { zero++; }
+        if (i <= WEAK_RECENT) { recent += Math.min(ap, FULL); recentDays++; }
+      }
+      if (days < WEAK_MIN_DAYS) { out.young++; return; }
+      var a = att[m.id] || { fought: 0, wars: 0 };
+      out.rows.push({ m: m, reach: (capped / days + recent / recentDays) / 2 / FULL, days: days, full: full, zero: zero, avg: Math.round(sum / days), noDiscord: linked && !s.links[m.id], fought: a.fought, wars: a.wars, idle: idleDays(s, m.id, mid) });
+    });
+    var avgs = out.rows.map(function (r) { return r.avg; }).sort(function (x, y) { return x - y; }), median = avgs[avgs.length >> 1] || 1;
+    out.rows.forEach(function (r) {
+      var hasWars = r.wars >= WEAK_MIN_WARS, most = 60 + (linked ? 20 : 0) + (hasWars ? 20 : 0), act = r.reach * 2 / 3 + Math.min(1, r.avg / median) / 3;
+      r.score = Math.round(((1 - act) * 60 + (r.noDiscord ? 20 : 0) + (hasWars ? (1 - r.fought / r.wars) * 20 : 0)) / most * 100);
+    });
+    out.rows.sort(function (x, y) { return y.score - x.score || x.m.level - y.m.level; });
+    return out;
+  }
+  function weakWhy(r) {
+    return "about " + r.avg.toLocaleString("en-US") + " points a day · " + r.full + "/" + r.days + " days at 100+" + (r.idle >= 2 ? " · 💤 " + r.idle + " days at 0 now" : r.zero ? " · " + r.zero + " at 0" : "")
+      + (r.noDiscord ? " · not on Discord" : "") + (r.wars ? " · fought " + r.fought + "/" + r.wars + " wars" : "");
+  }
+  function seatsLine(fam) {
+    var cap = +fam.capacity, n = fam.members.length;
+    return cap ? n + " of " + cap + " seats taken" + (cap > n ? ": " + (cap - n) + " free, so nobody has to go yet." : ", so a new member needs a free seat.") : "";
+  }
+  function weakHtml(s) {
+    var w = weakest(s), linked = s.links && Object.keys(s.links).length > 0, seats = seatsLine(last.fam), rows = weakAll ? w.rows : w.rows.slice(0, WEAK_SHOW), left = [];
+    if (w.away) { left.push(w.away + " marked away"); }
+    if (w.young) { left.push(w.young + " too new to judge"); }
+    var h = "<div class='st' style='color:var(--fg)'><b>🔻 Weakest members</b></div><div class='st'>" + (seats ? esc(seats) + " " : "") + "Weakest first, out of 100"
+      + "<span title='Activity over the last 30 days, with the last 7 counting extra" + (linked ? ", not being on Discord" : "") + " and missed wars. Leaders are left out.'> (what counts?)</span>."
+      + (left.length ? " Left out: " + left.join(", ") + "." : "") + (linked ? "" : " Discord only counts on the PC with the member links.") + "</div>";
+    if (!w.rows.length) { return h + "<div class='st'>Nobody to judge yet.</div>"; }
+    if (w.rows[0].days < ADVICE_MIN_DAYS) { h += "<div class='st wait'>Only " + w.rows[0].days + " days of history so far, so treat this as a rough guide.</div>"; }
+    h += "<table class='adv'><tbody>" + rows.map(function (r) {
+      return "<tr><td><a class='who' href='/game/player/" + esc(r.m.id) + "' title='Open profile'>" + esc(r.m.name) + "</a> <span class='idle'>" + esc(RANKS[r.m.rank] || r.m.rank) + " · lv " + r.m.level + "</span></td><td><b>" + r.score + "</b> · " + esc(weakWhy(r)) + "</td></tr>";
+    }).join("") + "</tbody></table>";
+    if (w.rows.length > WEAK_SHOW) { h += "<div class='row'><button type='button' data-weakall>" + (weakAll ? "Show the " + WEAK_SHOW + " weakest" : "Show all " + w.rows.length) + "</button></div>"; }
+    return h;
+  }
   function ranksHtml(s) {
     var a = rankAdvice(s), h = "";
     h += "<div class='st'>Based on the last " + a.days + " saved day" + (a.days === 1 ? "" : "s") + " (of " + ADVICE_DAYS + ") and " + a.wars + " tracked war" + (a.wars === 1 ? "" : "s") + ". Suggestions only; you decide.</div>";
     if (a.days < ADVICE_MIN_DAYS) { h += "<div class='st wait'>Promotions need at least " + ADVICE_MIN_DAYS + " saved days of history (" + a.days + " so far). Capo checks already work.</div>"; }
-    if (s.webhook && (a.ready.length || a.check.length)) { h += "<div class='row'><button type='button' data-postranks>Post to leadership chat</button></div>"; }
+    if (s.webhook) { h += "<div class='row'><button type='button' data-postranks>Post to leadership chat</button></div>"; }
     var block = function (title, list, empty) {
       return "<div class='st' style='color:var(--fg)'><b>" + title + "</b></div>" + (list.length ? "<table class='adv'><tbody>" + list.map(function (r) {
         return "<tr><td>" + esc(r.m.name) + " <span class='idle'>" + esc(RANKS[r.m.rank] || r.m.rank) + " · lv " + r.m.level + "</span></td><td>" + esc(a.why(r)) + "</td></tr>";
@@ -2414,17 +2474,19 @@ function reporter() {
     };
     h += block("⬆️ Ready for Capo", a.ready, "Nobody yet: Soldiers need 100+ on 80% of their days and 75% war attendance.");
     h += block("👀 Capos to check", a.check, "All Capos are doing fine.");
+    h += weakHtml(s);
     return h;
   }
   function postRanks() {
-    var s = load(), a = rankAdvice(s), line = function (r) { return "**" + md(r.m.name) + "** (lv " + r.m.level + ") — " + a.why(r); };
+    var s = load(), a = rankAdvice(s), line = function (r) { return "**" + md(r.m.name) + "** (lv " + r.m.level + ") — " + a.why(r); }, weak = weakest(s).rows.slice(0, WEAK_SHOW);
     if (!s.webhook) { return Promise.resolve(); }
     return postFor("ranks", s.webhook, {
       username: "Syndicate Activity", allowed_mentions: { parse: [] },
       embeds: [{
         title: "👑 Rank suggestions",
         description: ("⬆️ **Ready for Capo**\n" + (a.ready.length ? a.ready.map(line).join("\n") : "Nobody yet.")
-          + "\n\n👀 **Capos to check**\n" + (a.check.length ? a.check.map(line).join("\n") : "All Capos are doing fine.")).slice(0, 4000),
+          + "\n\n👀 **Capos to check**\n" + (a.check.length ? a.check.map(line).join("\n") : "All Capos are doing fine.")
+          + "\n\n🔻 **Weakest members**\n" + (weak.length ? weak.map(function (r) { return "**" + md(r.m.name) + "** (lv " + r.m.level + ", " + r.score + "/100) — " + weakWhy(r); }).join("\n") : "Nobody to judge yet.")).slice(0, 4000),
         color: 0xffbf30,
         footer: { text: "Last " + a.days + " saved days and " + a.wars + " tracked wars. Suggestions only." }
       }]
@@ -4385,6 +4447,7 @@ function reporter() {
     if (t.hasAttribute("data-planner")) { showPlanner = true; showRecruits = showRanks = false; redraw(); return; }
     if (t.hasAttribute("data-recruits")) { showRecruits = true; showPlanner = showRanks = false; redraw(); return; }
     if (t.hasAttribute("data-ranks")) { showRanks = true; showPlanner = showRecruits = false; redraw(); return; }
+    if (t.hasAttribute("data-weakall")) { weakAll = !weakAll; redraw(); return; }
     if (t.hasAttribute("data-postranks")) { postRanks().then(function () { if (!fails.ranks) { alert("Posted to the leadership chat."); } }); return; }
     if (t.hasAttribute("data-arm")) { armAttack(t.getAttribute("data-arm"), false); return; }
     if (t.hasAttribute("data-attacknow")) { armAttack(t.getAttribute("data-attacknow"), true); return; }
