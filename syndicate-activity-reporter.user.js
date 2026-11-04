@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.22.0
+// @version      2.23.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.22.0";
+  var VERSION = "2.23.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.23.0": [
+      "Extras: Auto-join wars signs you up for attacks and defences you may fight in, as soon as the panel sees them. Each player switches it on for themselves, and the game has to be open at some point in the 10 hours before the battle."
+    ],
     "2.22.0": [
       "Extras: effect sounds have their own volume slider, the voice uses names it can say (and Call me sets your own), and Windows pop-ups for your mission and the gang war, each with its own switch."
     ],
@@ -1860,7 +1863,7 @@ function reporter() {
   var KEEP = 3 * 60 * 1000;
   function keepFresh() {
     var s = load(), q = last && last.query;
-    if (!(s.warHook || s.boardHook || s.lvHook || box) || !q || q.state.fetchStatus === "fetching" || Date.now() - q.state.dataUpdatedAt < KEEP) { return; }
+    if (!(s.warHook || s.boardHook || s.lvHook || box || fxOn(s, "autojoin")) || !q || q.state.fetchStatus === "fetching" || Date.now() - q.state.dataUpdatedAt < KEEP) { return; }
     if (typeof q.fetch === "function" && q.options && q.options.queryFn) { q.fetch().catch(function () {}); }
   }
   // The docked panel can open on any game page, where the game hasn't loaded the family yet: load it through the game's own
@@ -1965,6 +1968,9 @@ function reporter() {
       }); }],
       ["Donation thank-yous", function () { return family().then(function (o) { if (!o.q.account) { throw new Error("the treasury request wasn't found"); } }); }],
       ["Invites, boosts and auto-attack", function () { return familyCommand(); }],
+      ["War auto-join", function () { return family().then(function () {
+        return Promise.all(famUrls.map(function (u) { return fetch(u).then(function (r) { return r.text(); }); }));
+      }).then(function (files) { if (!/participate/.test(files.join(""))) { throw new Error("the game's Register request wasn't found"); } }); }],
       ["Recruit and duel scans", function () { return playerRanking(); }],
       ["Duel win chances", function () { return duelTools().then(function (kit) { var me = duelMe(); if (me) { fights(kit, me); } }); }],
       ["Your damage", function () { return duelTools().then(function (kit) {
@@ -4478,7 +4484,7 @@ function reporter() {
   // ===== Extras: effects, sounds and the voice =====
   // Just for fun, each with a switch per PC in the panel's Extras (s.fx = {name: true or false}). The voice starts switched off, since a
   // talking panel shouldn't surprise anyone; the rest starts on. Nothing here posts to Discord except the Most Wanted poster.
-  var FX_ON = { popMission: false, popGang: false, sound: true, voice: false, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
+  var FX_ON = { autojoin: false, popMission: false, popGang: false, sound: true, voice: false, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
   var showExtras = false, fxQueue = [], fxActive = null, fxStyleEl = null;
   function fxOn(s, k) { return s.fx && typeof s.fx[k] === "boolean" ? s.fx[k] : FX_ON[k]; }
   function fxStyle() {
@@ -5114,6 +5120,73 @@ function reporter() {
     if (changed) { save(s); }
   }
 
+  // ----- Auto-join wars: signs this player up for every planned attack and defence they may fight in, with the same command as the
+  // game's own Register button. It acts as soon as a war is seen, since nobody knows if the game will still be open later in the 10 hours.
+  // The game's data is loaded fresh first. s.joined = {war id: {at, what, start}} remembers sign-ups made here for a day,
+  // s.joinTry = {war id: {n, at, why}} refusals, tried again every 10 minutes until the battle, because the 10 hours may outlast a bad spell.
+  var JOIN_GAP = 10 * 60000, JOIN_KEEP = 24 * 3600000, joinBusy = false;
+  function warOpenToMe(fam, w) { // the game's own conditions for its Register button
+    return w.status === "preparing" && (w.attackerId === fam.id || w.defenderId === fam.id) && startOf(w) > Date.now() + 30000;
+  }
+  function amRegistered(w) {
+    var me = duelMe();
+    return !!w.registered || !!me && (w.registeredUsers || []).some(function (id) { return String(id) === String(me.id); });
+  }
+  function joinable(fam) {
+    return warsOf(fam).filter(function (w) { return warOpenToMe(fam, w) && !amRegistered(w) && w.eligible !== false; });
+  }
+  function joinPopup(tag, title, body) {
+    if (window.Notification && Notification.permission === "granted") { showPopup(tag, title, body, PAGE); }
+  }
+  function checkAutoJoin() {
+    var s = load();
+    if (!fxOn(s, "autojoin") || joinBusy || !client) { return; }
+    if (!last) { loadOwnFamily(location.pathname.replace(/\/+$/, "")); return; } // with the panel closed nothing else loads the family
+    if (navigator.onLine === false) { return; }
+    var now = Date.now(), joined = s.joined || {}, tries = s.joinTry || {};
+    var w = joinable(last.fam).filter(function (x) { return !joined[x.id] && (!tries[x.id] || now - tries[x.id].at >= JOIN_GAP); })[0];
+    if (!w) { return; }
+    var q = last.query, famId = last.fam.id, warId = w.id;
+    joinBusy = true;
+    (q && typeof q.fetch === "function" && q.options && q.options.queryFn ? q.fetch().catch(function () { return q.state.data; }) : Promise.resolve(q && q.state.data)).then(function (d) {
+      var fam = d && (Array.isArray(d.members) ? d : d.family);
+      var cur = (fam ? joinable(fam) : [w]).filter(function (x) { return x.id === warId; })[0];
+      if (!cur) { return; } // signed up elsewhere in the meantime, or the battle has begun
+      var side = warSide(fam || last.fam, cur), what = (side.attack ? "attack on " : "defence against ") + nameOf(side.attack ? cur.defender : cur.attacker);
+      return familyCommand().then(function (fn) {
+        return fn({ data: { requestId: crypto.randomUUID(), command: { action: "participate", familyId: famId, warId: warId, registered: true } } });
+      }).then(function () {
+        var n = load(), keep = {};
+        n.joined = n.joined || {}; n.joined[warId] = { at: Date.now(), what: what, start: startOf(cur) };
+        Object.keys(n.joined).forEach(function (id) { if (Date.now() - n.joined[id].at < JOIN_KEEP) { keep[id] = n.joined[id]; } });
+        n.joined = keep;
+        if (n.joinTry) { delete n.joinTry[warId]; }
+        save(n);
+        joinPopup("join" + warId, "⚔️ You're in the war", "Signed up for the " + what + ". Battle at " + clock(startOf(cur)) + ".");
+        refreshFamily();
+      }, function (e) {
+        var n = load(), t = n.joinTry && n.joinTry[warId], count = (t ? t.n : 0) + 1;
+        n.joinTry = n.joinTry || {}; n.joinTry[warId] = { n: count, at: Date.now(), what: what, why: String(e && e.message || e) };
+        save(n);
+        if (count === 3) { joinPopup("join" + warId, "⚠️ Couldn't join the war", "The " + what + ": sign up on the Family tab."); }
+      });
+    }).catch(function () {}).then(function () { joinBusy = false; redraw(); });
+  }
+  function joinHtml(s) {
+    var fam = last && last.fam, wars = fam ? warsOf(fam).filter(function (w) { return warOpenToMe(fam, w); }) : [], joined = s.joined || {}, tries = s.joinTry || {}, shown = {}, lines = [];
+    Object.keys(joined).sort(function (a, b) { return joined[b].at - joined[a].at; }).forEach(function (id) {
+      if (Date.now() - joined[id].at < JOIN_KEEP) { shown[id] = 1; lines.push("<div class='st ok'>✅ Signed up for the " + esc(joined[id].what) + " at " + clock(joined[id].at) + ".</div>"); }
+    });
+    wars.forEach(function (w) {
+      if (shown[w.id]) { return; }
+      var foe = nameOf(w.attackerId === fam.id ? w.defender : w.attacker);
+      if (amRegistered(w)) { lines.push("<div class='st ok'>✅ You're signed up against " + esc(foe) + ".</div>"); }
+      else if (w.eligible === false) { lines.push("<div class='st'>You can't fight " + esc(foe) + ": you needed 12 hours in the family when that war was declared.</div>"); }
+      else if (tries[w.id]) { lines.push("<div class='st bad'>Couldn't sign up against " + esc(foe) + ", trying again every 10 minutes. The game said: " + esc(tries[w.id].why) + "</div>"); }
+    });
+    return lines.join("");
+  }
+
   // ----- The Extras menu -----
   function extrasHtml(s) {
     var row = function (key, label, tip, tests) {
@@ -5122,7 +5195,9 @@ function reporter() {
     var test = function (k, label) { return "<button type='button' data-fxtest='" + k + "'>" + label + "</button>"; };
     var intro = "<div class='xrow' title='Plays over the panel when the game loads. A click skips it.'><span class='xn'>🖥️ Startup animation</span><button type='button' data-introtoggle>" + (s.intro === false ? "Off" : "On") + "</button>" + test("intro", "Play") + "</div>";
     var voices = voiceList(), current = voicePick(s), vol = typeof s.voiceVol === "number" ? s.voiceVol : 80;
-    var h = "<div class='setup'><b>Extras on this PC</b><div style='font-size:11.5px;color:var(--muted)'>Just for fun.</div>"
+    var h = "<div class='setup'><b>Extras on this PC</b><div style='font-size:11.5px;color:var(--muted)'>Mostly for fun.</div>"
+      + row("autojoin", "⚔️ Auto-join wars", "Signs you up for every attack and defence you may fight in, as soon as it shows up. Once you're signed up, the game has no button to take it back.")
+      + (fxOn(s, "autojoin") ? "<div style='font-size:11.5px;color:var(--muted)'>The game has to be open at some point in the 10 hours before the battle. If it stays closed the whole time, nothing can sign you up.</div>" + joinHtml(s) : "")
       + intro
       + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
       + (fxOn(s, "voice") && voices.length ? "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>"
@@ -5381,6 +5456,7 @@ function reporter() {
     autoBackup();
     checkDebriefs();
     checkAutoAttack();
+    checkAutoJoin();
     checkEvening();
     autoRecruits();
     checkRecord();
