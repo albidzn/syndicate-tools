@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.27.0
+// @version      2.28.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.27.0";
+  var VERSION = "2.28.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.28.0": [
+      "More voice reminders: new goods in the shops, and your food, mission vehicle, crew members or family boosts running out."
+    ],
     "2.27.0": [
       "Voice reminders, with their own switch in Extras: gang war, survival, wanted and free duel ready, energy full, and auto-join failed."
     ],
@@ -4877,7 +4880,8 @@ function reporter() {
   if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = function () { if (showExtras) { redraw(); } }; }
   // Spoken once when a timer runs out. s.voiceDue = {what: when it's due while waiting, minus that once said}, so a reload or a second tab doesn't say it twice.
   // A timer never seen counting down here, or that ran out over 10 minutes ago, isn't news. Energy is said once each time it fills up, also if it was already full.
-  var REMIND_LINES = { gang: "Gang war is ready.", survival: "Survival is ready.", wanted: "Your wanted attack is ready.", duel: "Your free duel is ready.", energy: "Your energy is full." };
+  var REMIND_LINES = { gang: "Gang war is ready.", survival: "Survival is ready.", wanted: "Your wanted attack is ready.", duel: "Your free duel is ready.", energy: "Your energy is full.",
+    weapon: "The weapon shop has new goods.", food: "The food shop has new goods.", eaten: "Your food has run out.", vehicle: "Your mission vehicle has run out.", crew: "A crew member has run out.", boostxp: "The family XP boost has ended.", boostcash: "The family cash boost has ended." };
   var JOIN_FAILED_LINE = "I could not sign you up for the war. Please do it yourself.";
   function checkReminders() {
     var s = load();
@@ -4894,10 +4898,20 @@ function reporter() {
     var all = s.cityTimers || {};
     Object.keys(CITY_NAMES).forEach(function (c) {
       var t = all[c] || {};
-      ["gang", "survival", "wanted"].forEach(function (k) { due(k + c, t[k], k); });
+      ["gang", "survival", "wanted", "weapon", "food"].forEach(function (k) { due(k + c, t[k], k); });
     });
     due("duel", duelCooldown(), "duel");
     var me = duelMe();
+    if (me) {
+      (me.gang || []).forEach(function (g) { if (g) { due("crew" + g.id, timeOf(g.endsAt), "crew"); } });
+      if (me.missionBooster && me.missionBooster.id) { due("vehicle", timeOf(me.missionBooster.endsAt), "vehicle"); }
+      (me.food || []).forEach(function (f) { var it = f && f.item; if (it && it.usedAt && it.durationDays) { due("eaten" + it.id, timeOf(it.usedAt) + it.durationDays * DAY, "eaten"); } });
+    }
+    var fp = last && last.fam && last.fam.private;
+    if (fp) { // a boost that auto-renews on this PC is about to be bought again, so that isn't news
+      var renews = autoOn(s, fp);
+      ["xp", "cash"].forEach(function (k) { if (!renews[k]) { due("boost" + k, boostEnd(fp, k), "boost" + k); } });
+    }
     if (me && typeof me.energy === "number") {
       if (me.energy >= 100 && !said.full) { said.full = true; changed = true; speak(REMIND_LINES.energy); }
       else if (me.energy < 95 && said.full) { said.full = false; changed = true; }
@@ -5454,7 +5468,7 @@ function reporter() {
       + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
       + (fxOn(s, "voice") && voices.length ? (s.elKey ? "" : "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>")
         + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>"
-        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + row("voiceRemind", "⏰ Voice reminders", "Says when your gang war, survival, wanted attack or free duel is ready, when your energy is full, and when auto-join fails. Gang war, survival and wanted count once you've opened their page in that city. The game has to be open.") + elHtml(s) : "")
+        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + row("voiceRemind", "⏰ Voice reminders", "Says when your gang war, survival, wanted attack or free duel is ready, when a shop has new goods, when your food, mission vehicle, a crew member or a family boost runs out, when your energy is full, and when auto-join fails. City timers count once you've opened their page in that city. The game has to be open.") + elHtml(s) : "")
       + row("popMission", "🔔 Pop-up: mission ready", "A Windows pop-up when your mission is done, also when the game is in the background. Click it to open the bar. The game has to be open.", test("popMission", "Test"))
       + row("popGang", "🔔 Pop-up: gang war ready", "A Windows pop-up when you can fight again. Each city counts once you've opened its gang war map. The game has to be open.", test("popGang", "Test"))
       + (popNote ? "<div class='st bad'>" + esc(popNote) + "</div>" : "")
