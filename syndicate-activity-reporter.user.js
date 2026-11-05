@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.25.1
+// @version      2.26.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.25.1";
+  var VERSION = "2.26.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.26.0": [
+      "ElevenLabs now speaks every announcement. It leaves out enemy names and exact times so each line is only paid for once, and the Windows voice stays silent while a key is saved."
+    ],
     "2.25.1": [
       "ElevenLabs: the voice list now loads whenever it's missing, and Extras says why if the key can't list voices."
     ],
@@ -553,6 +556,13 @@ function reporter() {
     vLevel: ["Congratulations. You have reached level {lv}.", "Level {lv}, boss. Very impressive.", "You are now level {lv}. The others should be worried."],
     vFamLevel: ["The family has reached level {lv}.", "Family level {lv}. The empire grows, boss."],
     vReset: ["One hour until the daily reset. You are at {ap} activity.", "Boss, one hour left today, and you are only at {ap} activity."],
+    eWarAttack: ["War declared, boss.", "We are going to war."],
+    eWarDefend: ["Alert. We are under attack.", "Warning. Another family has declared war on us."],
+    eWin: ["Victory. Well done, boss.", "We won the war."],
+    eLoss: ["We lost the war. We go again.", "Defeat. It won't happen twice."],
+    eLevel: ["Congratulations. You have gone up a level.", "Another level, boss. Very impressive."],
+    eFamLevel: ["The family has gone up a level.", "The family is a level stronger, boss."],
+    eReset: ["One hour until the daily reset. You are under 100 activity.", "Boss, one hour left today, and you are still under 100 activity."],
     fxWin: ["Clean work, everyone. Nobody saw anything.", "Drinks at the bakery. Don't bring the receipts.", "Another one for the wall.", "Well done. Nonna made extra.", "That's how it's done. Take notes, other families.", "Tell your friends. Actually, don't."],
     fxLoss: ["Heads up. We'll remember this one.", "Tough one. Regroup, gear up, go again.", "Not our night. There's always another night.", "Eat something. Then we plan.", "Nobody's mad. Well. Somebody's mad.", "Write the name in the little black book."],
     tickJoke: ["Police baffled.", "Sources say it was the grinding.", "Nobody saw a thing.", "The family denies everything.", "Nonna is proud.", "More at eleven.", "The mayor declined to comment.", "Vinnie says the numbers check out.", "Witnesses have stopped talking.", "Stay tuned."],
@@ -4717,19 +4727,19 @@ function reporter() {
   function speak(text, force) {
     if (!window.speechSynthesis || !text) { return; }
     var s = load();
+    if (s.elKey) { speakNice(text, force); return; }
     if (!force && !fxOn(s, "voice")) { return; }
     if (!force && navigator.userActivation && !navigator.userActivation.hasBeenActive) { voiceWaiting = { text: text, at: Date.now() }; return; }
-    if (elBusy) { elAfter.push([text, force]); return; }
     var u = new SpeechSynthesisUtterance(text), v = voicePick(s);
     if (v) { u.voice = v; u.lang = v.lang; }
     u.rate = 0.98; u.pitch = 0.9; u.volume = (typeof s.voiceVol === "number" ? s.voiceVol : 80) / 100;
     speechSynthesis.speak(u);
   }
-  // ----- ElevenLabs, optional, for the lines that barely change: the greeting, your mission, levels. Everything else stays on the PC's voice, because new text costs credits.
+  // ----- ElevenLabs, optional. With a key every announcement uses it, in fixed wording (the e... lines) without names or exact numbers, because new text costs credits.
   // A clip is paid for once and then kept in this browser (IndexedDB), per voice and text. s.elUsed = {m: "2026-11", n: characters paid for this month}; over the limit (s.elCap)
-  // or on any failure, the line is simply spoken by the PC's voice. The key is never shown again after pasting and never leaves this PC except to ElevenLabs.
+  // or on any failure, a line that isn't saved yet stays quiet: the PC's voice is never used while there's a key. The key is never shown again after pasting and never leaves this PC except to ElevenLabs.
   var EL_API = "https://api.elevenlabs.io", EL_MODEL = "eleven_flash_v2_5", EL_VOICE = "JBFqnCBsd6RMkjVDRZzb", EL_CAP = 3000; // that voice is George, a British default voice
-  var elBusy = 0, elChain = Promise.resolve(), elAfter = [], elNote = "", elListNote = "", elListTried = false, elPausedUntil = 0, elDbP = null, elMem = {};
+  var elChain = Promise.resolve(), elNote = "", elListNote = "", elListTried = false, elPausedUntil = 0, elDbP = null, elMem = {};
   function elMonth() { var d = new Date(); return d.getFullYear() + "-" + (d.getMonth() < 9 ? "0" : "") + (d.getMonth() + 1); }
   function elUsed(s) { return s.elUsed && s.elUsed.m === elMonth() ? +s.elUsed.n || 0 : 0; }
   function elCap(s) { return typeof s.elCap === "number" && s.elCap >= 0 ? s.elCap : EL_CAP; }
@@ -4757,9 +4767,9 @@ function reporter() {
     elDb().then(function (db) { db.transaction("clips", "readwrite").objectStore("clips").put(blob, id); }).catch(function () {});
   }
   function elFail(status, detail) {
-    var pause = 5 * 60000, why = "ElevenLabs didn't answer, so the PC's voice is speaking for now.";
-    if (detail === "quota_exceeded") { pause = 60 * 60000; why = "Your ElevenLabs credits have run out, so the PC's voice is speaking for now."; }
-    else if (status === 401) { pause = 30 * 60000; why = "ElevenLabs refused this key, so the PC's voice is speaking for now."; }
+    var pause = 5 * 60000, why = "ElevenLabs didn't answer, so new lines stay quiet for now.";
+    if (detail === "quota_exceeded") { pause = 60 * 60000; why = "Your ElevenLabs credits have run out, so new lines stay quiet for now."; }
+    else if (status === 401) { pause = 30 * 60000; why = "ElevenLabs refused this key, so new lines stay quiet for now."; }
     else if (status === 404) { pause = 30 * 60000; why = "ElevenLabs doesn't know this voice. Pick another one."; }
     else if (status === 402) { pause = 30 * 60000; why = "This voice needs a paid ElevenLabs plan. Pick another one."; }
     elPausedUntil = Date.now() + pause;
@@ -4801,23 +4811,21 @@ function reporter() {
       if (played && played.catch) { played.catch(function () { end(true); }); }
     });
   }
-  function elFlush() {
-    if (elBusy) { return; }
-    var q = elAfter; elAfter = [];
-    q.forEach(function (x) { speak(x[0], x[1]); });
+  function elOn() { return !!load().elKey; }
+  // The time left in the few fixed steps there are clips for.
+  function elWhen(ms) {
+    var m = Math.max(1, Math.round(ms / 60000));
+    if (m >= 90) { return "Battle in " + Math.round(m / 60) + " hours."; }
+    return "Battle in " + (m >= 53 ? "1 hour" : m >= 38 ? "45 minutes" : m >= 23 ? "30 minutes" : m >= 8 ? "15 minutes" : "a few minutes") + ".";
   }
-  // A line that's worth the better voice. after = what follows in the PC's voice, like the next battle after the greeting.
-  function speakNice(text, force, after) {
-    if (!text) { return; }
-    var s = load();
-    if (!s.elKey) { speak(after ? text + " " + after : text, force); return; }
+  // One line, or several played one after the other, each its own saved clip. What can't be played stays quiet.
+  function speakNice(text, force) {
+    var parts = [].concat(text).filter(Boolean), s = load();
+    if (!parts.length) { return; }
+    if (!s.elKey) { speak(parts.join(" "), force); return; }
     if (!force && !fxOn(s, "voice")) { return; }
-    if (!force && navigator.userActivation && !navigator.userActivation.hasBeenActive) { voiceWaiting = { text: text, after: after, nice: true, at: Date.now() }; return; }
-    elBusy++;
-    if (after) { elAfter.push([after, force]); }
-    elChain = elChain.then(function () { return elClip(text); }).then(elPlay).catch(function () {
-      elBusy--; speak(text, true); elBusy++; // spoken at once by the PC's voice, ahead of what's waiting
-    }).then(function () { elBusy--; elFlush(); });
+    if (!force && navigator.userActivation && !navigator.userActivation.hasBeenActive) { voiceWaiting = { parts: parts, nice: true, at: Date.now() }; return; }
+    parts.forEach(function (one) { elChain = elChain.then(function () { return elClip(one); }).then(elPlay).catch(function () {}); });
   }
   function elLoadVoices() {
     var s = load();
@@ -4844,15 +4852,15 @@ function reporter() {
   function elHtml(s) {
     if (!s.elKey) {
       return "<div class='xrow' title='Optional. Your key stays in this browser and only goes to ElevenLabs.'><span class='xn'>✨ ElevenLabs key</span><input type='password' data-elkey placeholder='Paste your API key' spellcheck='false' autocomplete='new-password' style='max-width:150px'></div>"
-        + "<div style='font-size:11.5px;color:var(--muted)'>Optional, a better voice for the greeting, your mission and levels. Battle calls stay on the PC's voice to save your free credits.</div>"
+        + "<div style='font-size:11.5px;color:var(--muted)'>Optional, a better voice for every announcement. With a key it leaves out names and exact times, so each line is only paid for once.</div>"
         + (elNote ? "<div class='st bad'>" + esc(elNote) + "</div>" : "");
     }
     var list = s.elVoices || [], now = elVoiceId(s), used = elUsed(s), cap = elCap(s), full = used >= cap;
     if (!list.length && !elListTried) { elListTried = true; setTimeout(elLoadVoices, 0); } // once per page load, when Extras shows no list
     return "<div class='xrow'><span class='xn'>✨ ElevenLabs key saved</span><button type='button' data-elremove>Remove</button></div>"
       + (list.length ? "<div class='xrow' title='Picking one plays a free sample.'><span class='xn'>ElevenLabs voice</span><select data-elvoice>" + list.map(function (v) { return "<option value='" + esc(v.id) + "'" + (v.id === now ? " selected" : "") + ">" + esc(v.name + (v.accent ? " (" + v.accent + ")" : "")) + "</option>"; }).join("") + "</select></div>" : "")
-      + "<div class='xrow' title='New lines stop at this many characters a month, then the PC&#39;s voice takes over. Lines already saved stay free.'><span class='xn'>Monthly limit (characters)</span><input type='number' min='0' step='100' data-elcap value='" + cap + "' style='max-width:80px'></div>"
-      + "<div style='font-size:11.5px;color:var(--muted)'>" + used.toLocaleString("en-US") + " of " + cap.toLocaleString("en-US") + " used this month. Each line is paid for once, then it's free." + (full ? " Limit reached: new lines use the PC's voice." : "") + "</div>"
+      + "<div class='xrow' title='New lines stop at this many characters a month and stay quiet. Lines already saved stay free.'><span class='xn'>Monthly limit (characters)</span><input type='number' min='0' step='100' data-elcap value='" + cap + "' style='max-width:80px'></div>"
+      + "<div style='font-size:11.5px;color:var(--muted)'>" + used.toLocaleString("en-US") + " of " + cap.toLocaleString("en-US") + " used this month. Each line is paid for once, then it's free." + (full ? " Limit reached: new lines stay quiet." : "") + "</div>"
       + (elListNote ? "<div style='font-size:11.5px;color:var(--muted)'>" + esc(elListNote) + "</div>" : "")
       + (elNote ? "<div class='st bad'>" + esc(elNote) + "</div>" : "");
   }
@@ -4860,7 +4868,7 @@ function reporter() {
     window.addEventListener(k, function () {
       if (!voiceWaiting) { return; }
       var w = voiceWaiting; voiceWaiting = null;
-      if (Date.now() - w.at < 60000) { setTimeout(function () { if (w.nice) { speakNice(w.text, false, w.after); } else { speak(w.text); } }, 50); }
+      if (Date.now() - w.at < 60000) { setTimeout(function () { if (w.nice) { speakNice(w.parts); } else { speak(w.text); } }, 50); }
     }, true);
   });
   if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = function () { if (showExtras) { redraw(); } }; }
@@ -4879,7 +4887,9 @@ function reporter() {
       var reloaded = 0; try { reloaded = +sessionStorage.getItem("syn-reload") || 0; } catch (e) {}
       if (!document.hidden && Date.now() - reloaded > 2 * 60000) {
         var hour = new Date().getHours(), part = hour < 5 ? "evening" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening", nw0 = nextWar();
-        speakNice(say("vGreet", { part: part, name: spokenName(who2.name) }), false, nw0 ? say("vGreetWar", { foe: warFoe(last.fam, nw0.w), left: leftWords(startOf(nw0.w) - Date.now()) }) : "");
+        var greet = say("vGreet", { part: part, name: spokenName(who2.name) });
+        if (elOn()) { speakNice([greet, nw0 ? elWhen(startOf(nw0.w) - Date.now()) : ""]); }
+        else { speak(greet + (nw0 ? " " + say("vGreetWar", { foe: warFoe(last.fam, nw0.w), left: leftWords(startOf(nw0.w) - Date.now()) }) : "")); }
       }
     }
     var run = missionRunning();
@@ -4890,16 +4900,17 @@ function reporter() {
     warsOf(fam).forEach(function (w) {
       if (w.status !== "preparing" || startOf(w) <= now) { return; }
       var had = seen.wars[w.id], attack = w.attackerId === fam.id, left = startOf(w) - now, foe = warFoe(fam, w);
-      if (!had) { seen.wars[w.id] = "new"; changed = true; speak(say(attack ? "vWarAttack" : "vWarDefend", { foe: foe, left: leftWords(left) })); }
+      if (!had) { seen.wars[w.id] = "new"; changed = true; if (elOn()) { speakNice([say(attack ? "eWarAttack" : "eWarDefend"), elWhen(left)]); } else { speak(say(attack ? "vWarAttack" : "vWarDefend", { foe: foe, left: leftWords(left) })); } }
       if (had !== "soon" && left <= REMIND) {
         seen.wars[w.id] = "soon"; changed = true;
         var su = warSignups(fam)[attack ? "attack" : "defense"], reg = who2.me && su && su.ids[String(who2.me.id)];
-        speak(say("vWarSoon", { foe: foe, left: leftWords(left) }) + " " + (reg ? "You are registered." : "You are not registered yet."));
+        var regLine = reg ? "You are registered." : "You are not registered yet.";
+        if (elOn()) { speakNice([elWhen(left), regLine]); } else { speak(say("vWarSoon", { foe: foe, left: leftWords(left) }) + " " + regLine); }
       }
     });
     var mid = dayStart(now), day = dayKey(mid);
     if (seen.day !== day && mid + DAY - now <= HOUR && who2.self && who2.self.today < FULL && last.at > now - 10 * 60000) {
-      seen.day = day; changed = true; speak(say("vReset", { ap: who2.self.today }));
+      seen.day = day; changed = true; if (elOn()) { speakNice(say("eReset")); } else { speak(say("vReset", { ap: who2.self.today })); }
     }
     if (changed) { save(s); }
   }
@@ -5015,7 +5026,8 @@ function reporter() {
     if (Date.now() - startOf(w) > 12 * HOUR) { return; } // old news
     var go = function (det) {
       var o = warInfo(fam, w, det), n = load();
-      speak(say(o.won ? "vWin" : "vLoss", { foe: o.foe }) + (o.mvp ? " " + say("vMvp", { name: spokenName(o.mvp.name) }) : ""));
+      if (elOn()) { speakNice([say(o.won ? "eWin" : "eLoss"), o.mvp && o.mvp.name === fxMe().name ? "You were the MVP." : ""]); }
+      else { speak(say(o.won ? "vWin" : "vLoss", { foe: o.foe }) + (o.mvp ? " " + say("vMvp", { name: spokenName(o.mvp.name) }) : "")); }
       if (fxOn(n, "warfx")) { fxQueue.push(function () { playWarFx(o); }); }
     };
     warDetail(w.id).then(go, function () { go(null); });
@@ -5033,11 +5045,11 @@ function reporter() {
     if (!last) { return; }
     var s = load(), me = fxMe(), mine = me.self ? me.self.level : 0, fam = typeof last.fam.level === "number" ? last.fam.level : 0, lv = s.fxLv || {}, changed = !s.fxLv;
     if (mine && lv.me && mine > lv.me) {
-      speakNice(say("vLevel", { lv: mine }));
+      if (elOn()) { speakNice(say("eLevel")); } else { speak(say("vLevel", { lv: mine })); }
       if (fxOn(s, "fireworks")) { fxQueue.push(function () { playFireworks("LEVEL " + mine, me.name.toUpperCase()); }); }
     }
     if (fam && lv.fam && fam > lv.fam) {
-      speakNice(say("vFamLevel", { lv: fam }));
+      if (elOn()) { speakNice(say("eFamLevel")); } else { speak(say("vFamLevel", { lv: fam })); }
       if (fxOn(s, "fireworks")) { fxQueue.push(function () { playFireworks("LEVEL " + fam, String(last.fam.name || "The family").toUpperCase()); }); }
     }
     if (mine && mine !== lv.me) { lv.me = mine; changed = true; }
@@ -5405,7 +5417,7 @@ function reporter() {
       + (fxOn(s, "autojoin") ? "<div style='font-size:11.5px;color:var(--muted)'>The game has to be open at some point in the 10 hours before the battle. If it stays closed the whole time, nothing can sign you up.</div>" + joinHtml(s) : "")
       + intro
       + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
-      + (fxOn(s, "voice") && voices.length ? "<div class='xrow'><span class='xn'>" + (s.elKey ? "PC voice" : "Voice") + "</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>"
+      + (fxOn(s, "voice") && voices.length ? (s.elKey ? "" : "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>")
         + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>"
         + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + elHtml(s) : "")
       + row("popMission", "🔔 Pop-up: mission ready", "A Windows pop-up when your mission is done, also when the game is in the background. Click it to open the bar. The game has to be open.", test("popMission", "Test"))
