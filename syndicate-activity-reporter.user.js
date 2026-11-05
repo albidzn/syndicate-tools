@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.26.0
+// @version      2.27.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.26.0";
+  var VERSION = "2.27.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.27.0": [
+      "Voice reminders, with their own switch in Extras: gang war, survival, wanted and free duel ready, energy full, and auto-join failed."
+    ],
     "2.26.0": [
       "ElevenLabs now speaks every announcement. It leaves out enemy names and exact times so each line is only paid for once, and the Windows voice stays silent while a key is saved."
     ],
@@ -4567,7 +4570,7 @@ function reporter() {
   // ===== Extras: effects, sounds and the voice =====
   // Just for fun, each with a switch per PC in the panel's Extras (s.fx = {name: true or false}). The voice starts switched off, since a
   // talking panel shouldn't surprise anyone; the rest starts on. Nothing here posts to Discord except the Most Wanted poster.
-  var FX_ON = { autojoin: false, popMission: false, popGang: false, sound: true, voice: false, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
+  var FX_ON = { autojoin: false, popMission: false, popGang: false, sound: true, voice: false, voiceRemind: true, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
   var showExtras = false, fxQueue = [], fxActive = null, fxStyleEl = null;
   function fxOn(s, k) { return s.fx && typeof s.fx[k] === "boolean" ? s.fx[k] : FX_ON[k]; }
   function fxStyle() {
@@ -4872,6 +4875,35 @@ function reporter() {
     }, true);
   });
   if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = function () { if (showExtras) { redraw(); } }; }
+  // Spoken once when a timer runs out. s.voiceDue = {what: when it's due while waiting, minus that once said}, so a reload or a second tab doesn't say it twice.
+  // A timer never seen counting down here, or that ran out over 10 minutes ago, isn't news. Energy is said once each time it fills up, also if it was already full.
+  var REMIND_LINES = { gang: "Gang war is ready.", survival: "Survival is ready.", wanted: "Your wanted attack is ready.", duel: "Your free duel is ready.", energy: "Your energy is full." };
+  var JOIN_FAILED_LINE = "I could not sign you up for the war. Please do it yourself.";
+  function checkReminders() {
+    var s = load();
+    if (!client || !fxOn(s, "voice") || !fxOn(s, "voiceRemind")) { return; }
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) { return; } // kept for after the first click
+    var said = s.voiceDue = s.voiceDue || {}, changed = false, now = Date.now(), spoken = {};
+    function due(key, end, what) {
+      if (!end) { return; }
+      if (end > now) { if (said[key] !== end) { said[key] = end; changed = true; } return; }
+      if (said[key] !== end) { return; }
+      said[key] = -end; changed = true;
+      if (now - end < 10 * 60000 && !spoken[what]) { spoken[what] = true; speak(REMIND_LINES[what]); }
+    }
+    var all = s.cityTimers || {};
+    Object.keys(CITY_NAMES).forEach(function (c) {
+      var t = all[c] || {};
+      ["gang", "survival", "wanted"].forEach(function (k) { due(k + c, t[k], k); });
+    });
+    due("duel", duelCooldown(), "duel");
+    var me = duelMe();
+    if (me && typeof me.energy === "number") {
+      if (me.energy >= 100 && !said.full) { said.full = true; changed = true; speak(REMIND_LINES.energy); }
+      else if (me.energy < 95 && said.full) { said.full = false; changed = true; }
+    }
+    if (changed) { save(s); }
+  }
   function leftWords(ms) { // "3 hours" or "25 minutes", for saying out loud
     var m = Math.max(1, Math.round(ms / 60000));
     if (m >= 90) { var h = Math.round(m / 60); return h + " hour" + (h === 1 ? "" : "s"); }
@@ -5385,7 +5417,10 @@ function reporter() {
         var n = load(), t = n.joinTry && n.joinTry[warId], count = (t ? t.n : 0) + 1;
         n.joinTry = n.joinTry || {}; n.joinTry[warId] = { n: count, at: Date.now(), what: what, why: String(e && e.message || e) };
         save(n);
-        if (count === 3) { joinPopup("join" + warId, "⚠️ Couldn't join the war", "The " + what + ": sign up on the Family tab."); }
+        if (count === 3) {
+          joinPopup("join" + warId, "⚠️ Couldn't join the war", "The " + what + ": sign up on the Family tab.");
+          if (fxOn(n, "voiceRemind")) { speak(JOIN_FAILED_LINE); }
+        }
       });
     }).catch(function () {}).then(function () { joinBusy = false; redraw(); });
   }
@@ -5419,7 +5454,7 @@ function reporter() {
       + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
       + (fxOn(s, "voice") && voices.length ? (s.elKey ? "" : "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>")
         + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>"
-        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + elHtml(s) : "")
+        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + row("voiceRemind", "⏰ Voice reminders", "Says when your gang war, survival, wanted attack or free duel is ready, when your energy is full, and when auto-join fails. Gang war, survival and wanted count once you've opened their page in that city. The game has to be open.") + elHtml(s) : "")
       + row("popMission", "🔔 Pop-up: mission ready", "A Windows pop-up when your mission is done, also when the game is in the background. Click it to open the bar. The game has to be open.", test("popMission", "Test"))
       + row("popGang", "🔔 Pop-up: gang war ready", "A Windows pop-up when you can fight again. Each city counts once you've opened its gang war map. The game has to be open.", test("popGang", "Test"))
       + (popNote ? "<div class='st bad'>" + esc(popNote) + "</div>" : "")
@@ -5454,7 +5489,7 @@ function reporter() {
   // Runs on every tick. Big moments wait until someone can see them.
   function fxTick() {
     try {
-      checkVoice(); checkLevels(); checkWarFx(); checkAlert(); autoPoster(); checkPopups();
+      checkVoice(); checkReminders(); checkLevels(); checkWarFx(); checkAlert(); autoPoster(); checkPopups();
       if (fxQueue.length && !document.hidden && box && document.body.contains(box) && !box.classList.contains("min") && !introStop && !fxActive) { fxQueue.shift()(); }
     } catch (e) {}
     syncTicker();
