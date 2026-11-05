@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.25.0
+// @version      2.25.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.25.0";
+  var VERSION = "2.25.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.25.1": [
+      "ElevenLabs: the voice list now loads whenever it's missing, and Extras says why if the key can't list voices."
+    ],
     "2.25.0": [
       "Extras: an optional ElevenLabs voice for the greeting, your mission and levels. Battle calls stay on the PC's voice, each line is paid for only once, and there's a monthly limit."
     ],
@@ -4391,7 +4394,7 @@ function reporter() {
     if (t && t.hasAttribute && t.hasAttribute("data-voicecall")) { var sc = load(); sc.voiceCall = t.value.trim(); save(sc); t.blur(); speakNice(say("vGreet", { part: "evening", name: spokenName(fxMe().name) }), true); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-voicepick")) { var sp = load(); sp.voiceName = t.value; save(sp); speak(say("vGreet", { part: "evening", name: spokenName(fxMe().name) }), true); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-voicevol")) { var sq = load(); sq.voiceVol = +t.value; save(sq); t.blur(); speakNice("Volume set.", true); return; }
-    if (t && t.hasAttribute && t.hasAttribute("data-elkey")) { var se = load(), pasted = t.value.trim(); t.value = ""; t.blur(); if (pasted) { se.elKey = pasted; save(se); elPausedUntil = 0; elSetNote(""); elLoadVoices(); redraw(); } return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-elkey")) { var se = load(), pasted = t.value.trim(); t.value = ""; t.blur(); if (pasted) { se.elKey = pasted; save(se); elPausedUntil = 0; elListNote = ""; elListTried = true; elSetNote(""); elLoadVoices(); redraw(); } return; }
     if (t && t.hasAttribute && t.hasAttribute("data-elvoice")) { var sw = load(); sw.elVoice = t.value; save(sw); elPausedUntil = 0; elSetNote(""); elPreview(t.value); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-elcap")) { var sl = load(); sl.elCap = Math.max(0, parseInt(t.value, 10) || 0); save(sl); t.blur(); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-ra")) { var s0 = load(); s0.recruitAlertMin = Math.max(0, parseInt(t.value, 10) || 0); save(s0); t.blur(); redraw(); return; }
@@ -4473,7 +4476,7 @@ function reporter() {
       return;
     }
     if (t.hasAttribute("data-fxtest")) { fxTest(t.getAttribute("data-fxtest")); return; }
-    if (t.hasAttribute("data-elremove")) { delete s.elKey; delete s.elVoices; delete s.elVoice; save(s); elPausedUntil = 0; elSetNote(""); redraw(); return; }
+    if (t.hasAttribute("data-elremove")) { delete s.elKey; delete s.elVoices; delete s.elVoice; save(s); elPausedUntil = 0; elListNote = ""; elListTried = false; elSetNote(""); redraw(); return; }
     if (t.hasAttribute("data-overtoggle")) { s.overtakes = s.overtakes === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-ratoggle")) { s.recruitAlert = s.recruitAlert === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-rscan")) { runRecruitScan(); return; }
@@ -4726,7 +4729,7 @@ function reporter() {
   // A clip is paid for once and then kept in this browser (IndexedDB), per voice and text. s.elUsed = {m: "2026-11", n: characters paid for this month}; over the limit (s.elCap)
   // or on any failure, the line is simply spoken by the PC's voice. The key is never shown again after pasting and never leaves this PC except to ElevenLabs.
   var EL_API = "https://api.elevenlabs.io", EL_MODEL = "eleven_flash_v2_5", EL_VOICE = "JBFqnCBsd6RMkjVDRZzb", EL_CAP = 3000; // that voice is George, a British default voice
-  var elBusy = 0, elChain = Promise.resolve(), elAfter = [], elNote = "", elPausedUntil = 0, elDbP = null, elMem = {};
+  var elBusy = 0, elChain = Promise.resolve(), elAfter = [], elNote = "", elListNote = "", elListTried = false, elPausedUntil = 0, elDbP = null, elMem = {};
   function elMonth() { var d = new Date(); return d.getFullYear() + "-" + (d.getMonth() < 9 ? "0" : "") + (d.getMonth() + 1); }
   function elUsed(s) { return s.elUsed && s.elUsed.m === elMonth() ? +s.elUsed.n || 0 : 0; }
   function elCap(s) { return typeof s.elCap === "number" && s.elCap >= 0 ? s.elCap : EL_CAP; }
@@ -4825,11 +4828,11 @@ function reporter() {
     }).then(function (b) {
       var fresh = load();
       fresh.elVoices = (b.voices || []).map(function (v) { return { id: v.voice_id, name: String(v.name || "").split(" - ")[0], accent: v.labels && v.labels.accent || "", preview: v.preview_url || "" }; }).sort(function (x, y) { return x.name.localeCompare(y.name); });
-      save(fresh); elSetNote(""); redraw();
+      elListNote = fresh.elVoices.length ? "" : "ElevenLabs sent no voices, so this uses George.";
+      save(fresh); redraw();
     }).catch(function (e) {
-      if (e.st === 401 && e.why === "missing_permissions") { elSetNote("This key may not list voices, so it uses the default voice, George."); return; }
-      if (e.st === 401) { elSetNote("ElevenLabs refused this key. Check it and paste it again."); return; }
-      elSetNote("ElevenLabs didn't answer. The voice list comes next time.");
+      elListNote = e.st === 401 || e.st === 403 ? "This key can't list voices, so it uses George. To choose another, give the key Voices access at ElevenLabs, then reload the game." : "ElevenLabs didn't send the voice list, so this uses your current voice. It tries again after a reload.";
+      if (showExtras) { redraw(); }
     });
   }
   function elPreview(id) { // ElevenLabs' own sample of a voice, which costs no credits
@@ -4845,10 +4848,12 @@ function reporter() {
         + (elNote ? "<div class='st bad'>" + esc(elNote) + "</div>" : "");
     }
     var list = s.elVoices || [], now = elVoiceId(s), used = elUsed(s), cap = elCap(s), full = used >= cap;
+    if (!list.length && !elListTried) { elListTried = true; setTimeout(elLoadVoices, 0); } // once per page load, when Extras shows no list
     return "<div class='xrow'><span class='xn'>✨ ElevenLabs key saved</span><button type='button' data-elremove>Remove</button></div>"
       + (list.length ? "<div class='xrow' title='Picking one plays a free sample.'><span class='xn'>ElevenLabs voice</span><select data-elvoice>" + list.map(function (v) { return "<option value='" + esc(v.id) + "'" + (v.id === now ? " selected" : "") + ">" + esc(v.name + (v.accent ? " (" + v.accent + ")" : "")) + "</option>"; }).join("") + "</select></div>" : "")
       + "<div class='xrow' title='New lines stop at this many characters a month, then the PC&#39;s voice takes over. Lines already saved stay free.'><span class='xn'>Monthly limit (characters)</span><input type='number' min='0' step='100' data-elcap value='" + cap + "' style='max-width:80px'></div>"
       + "<div style='font-size:11.5px;color:var(--muted)'>" + used.toLocaleString("en-US") + " of " + cap.toLocaleString("en-US") + " used this month. Each line is paid for once, then it's free." + (full ? " Limit reached: new lines use the PC's voice." : "") + "</div>"
+      + (elListNote ? "<div style='font-size:11.5px;color:var(--muted)'>" + esc(elListNote) + "</div>" : "")
       + (elNote ? "<div class='st bad'>" + esc(elNote) + "</div>" : "");
   }
   ["pointerdown", "keydown"].forEach(function (k) {
