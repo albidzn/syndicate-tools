@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.24.0
+// @version      2.25.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.24.0";
+  var VERSION = "2.25.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.25.0": [
+      "Extras: an optional ElevenLabs voice for the greeting, your mission and levels. Battle calls stay on the PC's voice, each line is paid for only once, and there's a monthly limit."
+    ],
     "2.24.0": [
       "Ranks tab: Weakest members, for when the family needs a seat. Ranked by activity over 30 days, Discord link and missed wars, with the seat count. Recruits points to it too."
     ],
@@ -4385,9 +4388,12 @@ function reporter() {
     var t = ev.target, k = t && t.getAttribute && t.getAttribute("data-rf");
     if (t && t.hasAttribute && t.hasAttribute("data-volslider")) { var sv = load(); sv.volume = +t.value; save(sv); setVolume(sv.volume); t.blur(); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-fxvol")) { var sf = load(); sf.fxVol = +t.value; save(sf); if (fxMaster) { fxMaster.gain.value = fxGain(sf.fxVol); } t.blur(); fxSound("ping", true); return; }
-    if (t && t.hasAttribute && t.hasAttribute("data-voicecall")) { var sc = load(); sc.voiceCall = t.value.trim(); save(sc); t.blur(); speak(say("vGreet", { part: "evening", name: spokenName(fxMe().name) }), true); redraw(); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-voicecall")) { var sc = load(); sc.voiceCall = t.value.trim(); save(sc); t.blur(); speakNice(say("vGreet", { part: "evening", name: spokenName(fxMe().name) }), true); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-voicepick")) { var sp = load(); sp.voiceName = t.value; save(sp); speak(say("vGreet", { part: "evening", name: spokenName(fxMe().name) }), true); return; }
-    if (t && t.hasAttribute && t.hasAttribute("data-voicevol")) { var sq = load(); sq.voiceVol = +t.value; save(sq); t.blur(); speak("Volume set.", true); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-voicevol")) { var sq = load(); sq.voiceVol = +t.value; save(sq); t.blur(); speakNice("Volume set.", true); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-elkey")) { var se = load(), pasted = t.value.trim(); t.value = ""; t.blur(); if (pasted) { se.elKey = pasted; save(se); elPausedUntil = 0; elSetNote(""); elLoadVoices(); redraw(); } return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-elvoice")) { var sw = load(); sw.elVoice = t.value; save(sw); elPausedUntil = 0; elSetNote(""); elPreview(t.value); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-elcap")) { var sl = load(); sl.elCap = Math.max(0, parseInt(t.value, 10) || 0); save(sl); t.blur(); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-ra")) { var s0 = load(); s0.recruitAlertMin = Math.max(0, parseInt(t.value, 10) || 0); save(s0); t.blur(); redraw(); return; }
     if (!k) { return; }
     var s = load(), rf = recruitFilter(s);
@@ -4467,6 +4473,7 @@ function reporter() {
       return;
     }
     if (t.hasAttribute("data-fxtest")) { fxTest(t.getAttribute("data-fxtest")); return; }
+    if (t.hasAttribute("data-elremove")) { delete s.elKey; delete s.elVoices; delete s.elVoice; save(s); elPausedUntil = 0; elSetNote(""); redraw(); return; }
     if (t.hasAttribute("data-overtoggle")) { s.overtakes = s.overtakes === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-ratoggle")) { s.recruitAlert = s.recruitAlert === false; save(s); redraw(); return; }
     if (t.hasAttribute("data-rscan")) { runRecruitScan(); return; }
@@ -4709,16 +4716,146 @@ function reporter() {
     var s = load();
     if (!force && !fxOn(s, "voice")) { return; }
     if (!force && navigator.userActivation && !navigator.userActivation.hasBeenActive) { voiceWaiting = { text: text, at: Date.now() }; return; }
+    if (elBusy) { elAfter.push([text, force]); return; }
     var u = new SpeechSynthesisUtterance(text), v = voicePick(s);
     if (v) { u.voice = v; u.lang = v.lang; }
     u.rate = 0.98; u.pitch = 0.9; u.volume = (typeof s.voiceVol === "number" ? s.voiceVol : 80) / 100;
     speechSynthesis.speak(u);
   }
+  // ----- ElevenLabs, optional, for the lines that barely change: the greeting, your mission, levels. Everything else stays on the PC's voice, because new text costs credits.
+  // A clip is paid for once and then kept in this browser (IndexedDB), per voice and text. s.elUsed = {m: "2026-11", n: characters paid for this month}; over the limit (s.elCap)
+  // or on any failure, the line is simply spoken by the PC's voice. The key is never shown again after pasting and never leaves this PC except to ElevenLabs.
+  var EL_API = "https://api.elevenlabs.io", EL_MODEL = "eleven_flash_v2_5", EL_VOICE = "JBFqnCBsd6RMkjVDRZzb", EL_CAP = 3000; // that voice is George, a British default voice
+  var elBusy = 0, elChain = Promise.resolve(), elAfter = [], elNote = "", elPausedUntil = 0, elDbP = null, elMem = {};
+  function elMonth() { var d = new Date(); return d.getFullYear() + "-" + (d.getMonth() < 9 ? "0" : "") + (d.getMonth() + 1); }
+  function elUsed(s) { return s.elUsed && s.elUsed.m === elMonth() ? +s.elUsed.n || 0 : 0; }
+  function elCap(s) { return typeof s.elCap === "number" && s.elCap >= 0 ? s.elCap : EL_CAP; }
+  function elVoiceId(s) { return s.elVoice || EL_VOICE; }
+  function elSetNote(text) { if (elNote !== text) { elNote = text; if (showExtras) { redraw(); } } }
+  function elDb() {
+    if (!elDbP) {
+      elDbP = new Promise(function (ok, no) {
+        var r = indexedDB.open("syn-voice", 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore("clips"); };
+        r.onsuccess = function () { ok(r.result); };
+        r.onerror = function () { no(r.error); };
+      });
+    }
+    return elDbP;
+  }
+  function elLoad(id) {
+    if (elMem[id]) { return Promise.resolve(elMem[id]); }
+    return elDb().then(function (db) {
+      return new Promise(function (ok) { var r = db.transaction("clips").objectStore("clips").get(id); r.onsuccess = function () { ok(r.result || null); }; r.onerror = function () { ok(null); }; });
+    }).catch(function () { return null; });
+  }
+  function elStore(id, blob) {
+    elMem[id] = blob;
+    elDb().then(function (db) { db.transaction("clips", "readwrite").objectStore("clips").put(blob, id); }).catch(function () {});
+  }
+  function elFail(status, detail) {
+    var pause = 5 * 60000, why = "ElevenLabs didn't answer, so the PC's voice is speaking for now.";
+    if (detail === "quota_exceeded") { pause = 60 * 60000; why = "Your ElevenLabs credits have run out, so the PC's voice is speaking for now."; }
+    else if (status === 401) { pause = 30 * 60000; why = "ElevenLabs refused this key, so the PC's voice is speaking for now."; }
+    else if (status === 404) { pause = 30 * 60000; why = "ElevenLabs doesn't know this voice. Pick another one."; }
+    else if (status === 402) { pause = 30 * 60000; why = "This voice needs a paid ElevenLabs plan. Pick another one."; }
+    elPausedUntil = Date.now() + pause;
+    elSetNote(why);
+  }
+  // Gives the clip for a line, from what's saved if possible. Rejects when it would have to pay and may not.
+  function elClip(text) {
+    var s = load(), id = elVoiceId(s) + "|" + text;
+    return elLoad(id).then(function (saved) {
+      if (saved) { return saved; }
+      if (Date.now() < elPausedUntil) { throw new Error("paused"); }
+      if (elUsed(s) + text.length > elCap(s)) { elSetNote(""); throw new Error("limit"); }
+      var stop = window.AbortController ? new AbortController() : null, timer = stop ? setTimeout(function () { stop.abort(); }, 15000) : 0;
+      return fetch(EL_API + "/v1/text-to-speech/" + encodeURIComponent(elVoiceId(s)), { method: "POST", signal: stop ? stop.signal : undefined, headers: { "xi-api-key": s.elKey, "Content-Type": "application/json" }, body: JSON.stringify({ text: text, model_id: EL_MODEL }) })
+        .then(function (r) {
+          clearTimeout(timer);
+          if (r.ok) { return r.blob(); }
+          return r.json().catch(function () { return {}; }).then(function (b) { var e = new Error("refused"); e.el = [r.status, b && b.detail && b.detail.status || ""]; throw e; });
+        })
+        .then(function (blob) {
+          var fresh = load();
+          fresh.elUsed = { m: elMonth(), n: elUsed(fresh) + text.length }; save(fresh);
+          elStore(id, blob); elSetNote("");
+          if (showExtras) { redraw(); }
+          return blob;
+        })
+        .catch(function (e) { clearTimeout(timer); if (e.el) { elFail(e.el[0], e.el[1]); } else { elFail(0, ""); } throw e; });
+    });
+  }
+  function elPlay(blob) {
+    return new Promise(function (ok, no) {
+      var url = URL.createObjectURL(blob), a = new Audio(url), s = load(), done = false;
+      var end = function (bad) { if (done) { return; } done = true; clearTimeout(guard); URL.revokeObjectURL(url); if (bad) { no(new Error("no play")); } else { ok(); } };
+      var guard = setTimeout(function () { end(false); }, 30000);
+      a.volume = (typeof s.voiceVol === "number" ? s.voiceVol : 80) / 100;
+      a.onended = function () { end(false); };
+      a.onerror = function () { end(true); };
+      var played = a.play();
+      if (played && played.catch) { played.catch(function () { end(true); }); }
+    });
+  }
+  function elFlush() {
+    if (elBusy) { return; }
+    var q = elAfter; elAfter = [];
+    q.forEach(function (x) { speak(x[0], x[1]); });
+  }
+  // A line that's worth the better voice. after = what follows in the PC's voice, like the next battle after the greeting.
+  function speakNice(text, force, after) {
+    if (!text) { return; }
+    var s = load();
+    if (!s.elKey) { speak(after ? text + " " + after : text, force); return; }
+    if (!force && !fxOn(s, "voice")) { return; }
+    if (!force && navigator.userActivation && !navigator.userActivation.hasBeenActive) { voiceWaiting = { text: text, after: after, nice: true, at: Date.now() }; return; }
+    elBusy++;
+    if (after) { elAfter.push([after, force]); }
+    elChain = elChain.then(function () { return elClip(text); }).then(elPlay).catch(function () {
+      elBusy--; speak(text, true); elBusy++; // spoken at once by the PC's voice, ahead of what's waiting
+    }).then(function () { elBusy--; elFlush(); });
+  }
+  function elLoadVoices() {
+    var s = load();
+    if (!s.elKey) { return; }
+    fetch(EL_API + "/v2/voices?page_size=100", { headers: { "xi-api-key": s.elKey } }).then(function (r) {
+      if (r.ok) { return r.json(); }
+      return r.json().catch(function () { return {}; }).then(function (b) { var e = new Error("refused"); e.st = r.status; e.why = b && b.detail && b.detail.status || ""; throw e; });
+    }).then(function (b) {
+      var fresh = load();
+      fresh.elVoices = (b.voices || []).map(function (v) { return { id: v.voice_id, name: String(v.name || "").split(" - ")[0], accent: v.labels && v.labels.accent || "", preview: v.preview_url || "" }; }).sort(function (x, y) { return x.name.localeCompare(y.name); });
+      save(fresh); elSetNote(""); redraw();
+    }).catch(function (e) {
+      if (e.st === 401 && e.why === "missing_permissions") { elSetNote("This key may not list voices, so it uses the default voice, George."); return; }
+      if (e.st === 401) { elSetNote("ElevenLabs refused this key. Check it and paste it again."); return; }
+      elSetNote("ElevenLabs didn't answer. The voice list comes next time.");
+    });
+  }
+  function elPreview(id) { // ElevenLabs' own sample of a voice, which costs no credits
+    var s = load(), v = (s.elVoices || []).filter(function (x) { return x.id === id; })[0];
+    if (!v || !v.preview) { return; }
+    var a = new Audio(v.preview); a.volume = (typeof s.voiceVol === "number" ? s.voiceVol : 80) / 100;
+    var played = a.play(); if (played && played.catch) { played.catch(function () {}); }
+  }
+  function elHtml(s) {
+    if (!s.elKey) {
+      return "<div class='xrow' title='Optional. Your key stays in this browser and only goes to ElevenLabs.'><span class='xn'>✨ ElevenLabs key</span><input type='password' data-elkey placeholder='Paste your API key' spellcheck='false' autocomplete='new-password' style='max-width:150px'></div>"
+        + "<div style='font-size:11.5px;color:var(--muted)'>Optional, a better voice for the greeting, your mission and levels. Battle calls stay on the PC's voice to save your free credits.</div>"
+        + (elNote ? "<div class='st bad'>" + esc(elNote) + "</div>" : "");
+    }
+    var list = s.elVoices || [], now = elVoiceId(s), used = elUsed(s), cap = elCap(s), full = used >= cap;
+    return "<div class='xrow'><span class='xn'>✨ ElevenLabs key saved</span><button type='button' data-elremove>Remove</button></div>"
+      + (list.length ? "<div class='xrow' title='Picking one plays a free sample.'><span class='xn'>ElevenLabs voice</span><select data-elvoice>" + list.map(function (v) { return "<option value='" + esc(v.id) + "'" + (v.id === now ? " selected" : "") + ">" + esc(v.name + (v.accent ? " (" + v.accent + ")" : "")) + "</option>"; }).join("") + "</select></div>" : "")
+      + "<div class='xrow' title='New lines stop at this many characters a month, then the PC&#39;s voice takes over. Lines already saved stay free.'><span class='xn'>Monthly limit (characters)</span><input type='number' min='0' step='100' data-elcap value='" + cap + "' style='max-width:80px'></div>"
+      + "<div style='font-size:11.5px;color:var(--muted)'>" + used.toLocaleString("en-US") + " of " + cap.toLocaleString("en-US") + " used this month. Each line is paid for once, then it's free." + (full ? " Limit reached: new lines use the PC's voice." : "") + "</div>"
+      + (elNote ? "<div class='st bad'>" + esc(elNote) + "</div>" : "");
+  }
   ["pointerdown", "keydown"].forEach(function (k) {
     window.addEventListener(k, function () {
       if (!voiceWaiting) { return; }
       var w = voiceWaiting; voiceWaiting = null;
-      if (Date.now() - w.at < 60000) { setTimeout(function () { speak(w.text); }, 50); }
+      if (Date.now() - w.at < 60000) { setTimeout(function () { if (w.nice) { speakNice(w.text, false, w.after); } else { speak(w.text); } }, 50); }
     }, true);
   });
   if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = function () { if (showExtras) { redraw(); } }; }
@@ -4737,11 +4874,11 @@ function reporter() {
       var reloaded = 0; try { reloaded = +sessionStorage.getItem("syn-reload") || 0; } catch (e) {}
       if (!document.hidden && Date.now() - reloaded > 2 * 60000) {
         var hour = new Date().getHours(), part = hour < 5 ? "evening" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening", nw0 = nextWar();
-        speak(say("vGreet", { part: part, name: spokenName(who2.name) }) + (nw0 ? " " + say("vGreetWar", { foe: warFoe(last.fam, nw0.w), left: leftWords(startOf(nw0.w) - Date.now()) }) : ""));
+        speakNice(say("vGreet", { part: part, name: spokenName(who2.name) }), false, nw0 ? say("vGreetWar", { foe: warFoe(last.fam, nw0.w), left: leftWords(startOf(nw0.w) - Date.now()) }) : "");
       }
     }
     var run = missionRunning();
-    if (run) { if (voiceMission > 0 && run.left === 0) { speak(say("vMission")); } voiceMission = run.left; } else { voiceMission = null; }
+    if (run) { if (voiceMission > 0 && run.left === 0) { speakNice(say("vMission")); } voiceMission = run.left; } else { voiceMission = null; }
     if (!last || !last.fam.private) { return; }
     var fam = last.fam, seen = s.voiceSaid, changed = !seen, now = Date.now();
     if (!seen) { seen = s.voiceSaid = { wars: {}, day: "" }; warsOf(fam).forEach(function (w) { if (w.status === "preparing") { seen.wars[w.id] = "new"; } }); }
@@ -4891,11 +5028,11 @@ function reporter() {
     if (!last) { return; }
     var s = load(), me = fxMe(), mine = me.self ? me.self.level : 0, fam = typeof last.fam.level === "number" ? last.fam.level : 0, lv = s.fxLv || {}, changed = !s.fxLv;
     if (mine && lv.me && mine > lv.me) {
-      speak(say("vLevel", { lv: mine }));
+      speakNice(say("vLevel", { lv: mine }));
       if (fxOn(s, "fireworks")) { fxQueue.push(function () { playFireworks("LEVEL " + mine, me.name.toUpperCase()); }); }
     }
     if (fam && lv.fam && fam > lv.fam) {
-      speak(say("vFamLevel", { lv: fam }));
+      speakNice(say("vFamLevel", { lv: fam }));
       if (fxOn(s, "fireworks")) { fxQueue.push(function () { playFireworks("LEVEL " + fam, String(last.fam.name || "The family").toUpperCase()); }); }
     }
     if (mine && mine !== lv.me) { lv.me = mine; changed = true; }
@@ -5140,7 +5277,7 @@ function reporter() {
       }
     })(0);
     fxSound("matrix", false);
-    speak("Access granted.");
+    speakNice("Access granted.");
   }
 
   // ----- Windows pop-ups for your mission and the gang war, through the browser's notifications. They need the browser's permission, asked when one is switched on.
@@ -5263,9 +5400,9 @@ function reporter() {
       + (fxOn(s, "autojoin") ? "<div style='font-size:11.5px;color:var(--muted)'>The game has to be open at some point in the 10 hours before the battle. If it stays closed the whole time, nothing can sign you up.</div>" + joinHtml(s) : "")
       + intro
       + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
-      + (fxOn(s, "voice") && voices.length ? "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>"
+      + (fxOn(s, "voice") && voices.length ? "<div class='xrow'><span class='xn'>" + (s.elKey ? "PC voice" : "Voice") + "</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>"
         + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>"
-        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" : "")
+        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + elHtml(s) : "")
       + row("popMission", "🔔 Pop-up: mission ready", "A Windows pop-up when your mission is done, also when the game is in the background. Click it to open the bar. The game has to be open.", test("popMission", "Test"))
       + row("popGang", "🔔 Pop-up: gang war ready", "A Windows pop-up when you can fight again. Each city counts once you've opened its gang war map. The game has to be open.", test("popGang", "Test"))
       + (popNote ? "<div class='st bad'>" + esc(popNote) + "</div>" : "")
@@ -5282,7 +5419,7 @@ function reporter() {
   function fxTest(k) {
     var me = fxMe(), name = me.name || "Your name";
     if (k === "intro") { playIntro(); return; }
-    if (k === "voice") { speak(say("vGreet", { part: "evening", name: spokenName(me.name) }), true); return; }
+    if (k === "voice") { speakNice(say("vGreet", { part: "evening", name: spokenName(me.name) }), true); return; }
     if (k === "sound") { fxSound("boot", true); return; }
     if (k === "popMission") { askPopups(function () { redraw(); showPopup("test", "🎯 Mission ready", "This is a test. Time for the next job.", BAR); }); return; }
     if (k === "popGang") { askPopups(function () { redraw(); showPopup("test", "🗺️ Gang war ready", "This is a test. You can fight again.", GANGWAR); }); return; }
