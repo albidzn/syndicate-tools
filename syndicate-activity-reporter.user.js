@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.28.1
+// @version      2.28.2
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.28.1";
+  var VERSION = "2.28.2";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.28.2": [
+      "Voice reminders for gang war, survival, wanted and the shops now only speak for the city you're in."
+    ],
     "2.28.1": [
       "The shops now use the game's names: Black market and Corner shop."
     ],
@@ -4898,13 +4901,12 @@ function reporter() {
       said[key] = -end; changed = true;
       if (now - end < 10 * 60000 && !spoken[what]) { spoken[what] = true; speak(REMIND_LINES[what]); }
     }
-    var all = s.cityTimers || {};
-    Object.keys(CITY_NAMES).forEach(function (c) {
-      var t = all[c] || {};
-      ["gang", "survival", "wanted", "weapon", "food"].forEach(function (k) { due(k + c, t[k], k); });
-    });
+    var all = s.cityTimers || {}, me = duelMe();
+    if (me && me.city) { // only the city you're in: the others wait until you're there
+      var t = all[me.city] || {};
+      ["gang", "survival", "wanted", "weapon", "food"].forEach(function (k) { due(k + me.city, t[k], k); });
+    }
     due("duel", duelCooldown(), "duel");
-    var me = duelMe();
     if (me) {
       (me.gang || []).forEach(function (g) { if (g) { due("crew" + g.id, timeOf(g.endsAt), "crew"); } });
       if (me.missionBooster && me.missionBooster.id) { due("vehicle", timeOf(me.missionBooster.endsAt), "vehicle"); }
@@ -5471,7 +5473,7 @@ function reporter() {
       + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
       + (fxOn(s, "voice") && voices.length ? (s.elKey ? "" : "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>")
         + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>"
-        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + row("voiceRemind", "⏰ Voice reminders", "Says when your gang war, survival, wanted attack or free duel is ready, when a shop has new goods, when your food, mission vehicle, a crew member or a family boost runs out, when your energy is full, and when auto-join fails. City timers count once you've opened their page in that city. The game has to be open.") + elHtml(s) : "")
+        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + row("voiceRemind", "⏰ Voice reminders", "Says when your gang war, survival, wanted attack or free duel is ready, when a shop has new goods, when your food, mission vehicle, a crew member or a family boost runs out, when your energy is full, and when auto-join fails. City timers only count for the city you're in, once you've opened their page there. The game has to be open.") + elHtml(s) : "")
       + row("popMission", "🔔 Pop-up: mission ready", "A Windows pop-up when your mission is done, also when the game is in the background. Click it to open the bar. The game has to be open.", test("popMission", "Test"))
       + row("popGang", "🔔 Pop-up: gang war ready", "A Windows pop-up when you can fight again. Each city counts once you've opened its gang war map. The game has to be open.", test("popGang", "Test"))
       + (popNote ? "<div class='st bad'>" + esc(popNote) + "</div>" : "")
