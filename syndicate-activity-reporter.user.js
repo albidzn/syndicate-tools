@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.28.0
+// @version      2.28.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.28.0";
+  var VERSION = "2.28.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.28.1": [
+      "The shops now use the game's names: Black market and Corner shop."
+    ],
     "2.28.0": [
       "More voice reminders: new goods in the shops, and your food, mission vehicle, crew members or family boosts running out."
     ],
@@ -3717,7 +3720,7 @@ function reporter() {
   // so each is remembered per city when the game has loaded it: s.cityTimers = {city: {weapon, food, wanted, gang, survival}}.
   var GANG_NAMES = { spy: "Spy", pickpocket: "Pickpocket", accountant: "Accountant", coach: "Fitness coach", fence: "Fence" };
   var BOOSTER_NAMES = { 1: "Bike", 2: "Taxi", 3: "Limousine", 4: "Jet" };
-  var CITY_TIMERS = [["weapon", "Weapon shop"], ["food", "Food shop"], ["wanted", "Wanted"], ["gang", "Gang war"], ["survival", "Survival"]];
+  var CITY_TIMERS = [["weapon", "Black market"], ["food", "Corner shop"], ["wanted", "Wanted"], ["gang", "Gang war"], ["survival", "Survival"]];
   function timeOf(v) { var t = v ? new Date(v).getTime() : 0; return t > 0 ? t : 0; }
   function rememberTimers() {
     var me = client && duelMe();
@@ -4881,7 +4884,7 @@ function reporter() {
   // Spoken once when a timer runs out. s.voiceDue = {what: when it's due while waiting, minus that once said}, so a reload or a second tab doesn't say it twice.
   // A timer never seen counting down here, or that ran out over 10 minutes ago, isn't news. Energy is said once each time it fills up, also if it was already full.
   var REMIND_LINES = { gang: "Gang war is ready.", survival: "Survival is ready.", wanted: "Your wanted attack is ready.", duel: "Your free duel is ready.", energy: "Your energy is full.",
-    weapon: "The weapon shop has new goods.", food: "The food shop has new goods.", eaten: "Your food has run out.", vehicle: "Your mission vehicle has run out.", crew: "A crew member has run out.", boostxp: "The family XP boost has ended.", boostcash: "The family cash boost has ended." };
+    weapon: "The black market has new goods.", food: "The corner shop has new goods.", eaten: "Your food has run out.", vehicle: "Your mission vehicle has run out.", crew: "A crew member has run out.", boostxp: "The family XP boost has ended.", boostcash: "The family cash boost has ended." };
   var JOIN_FAILED_LINE = "I could not sign you up for the war. Please do it yourself.";
   function checkReminders() {
     var s = load();
