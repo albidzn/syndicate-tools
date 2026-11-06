@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.30.0
+// @version      2.31.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.30.0";
+  var VERSION = "2.31.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.31.0": [
+      "Mission picker: new Stats mode, ranking missions by how much they add to your stats per energy (cash plus XP, weighted for your level)."
+    ],
     "2.30.0": [
       "Activity tab → No Discord: an ✉ Ask button for each member who isn't linked, sending a message through the game's mail (once a week per member)."
     ],
@@ -3252,7 +3255,18 @@ function reporter() {
   // scores each by XP and cash per energy for the chosen goal. The goal is shared with the bookmark (localStorage "mr-reader").
   // The list stays in memory after leaving the bar, marked as from the last visit.
   var MQ_NAMES = { old_man: "Old Man", cookie: "Cookie", agatha: "Agatha", sean: "Sean", vincenzo: "Vincenzo", velvet: "Velvet Kiss", dwayne: "Dwayne", jose: "José", isabel: "Isabel", carlos: "Carlos", little_joe: "Little Joe", madam_chow: "Mihn", mei: "Amaya", wing: "Akuma", ah_keung: "Mr. Woo", suki: "Katara" };
-  var MQ_MODES = { xp: { w: 1, label: "XP", title: "Best for XP" }, balanced: { w: 0.5, label: "Balanced", title: "Best balanced" }, cash: { w: 0, label: "Cash", title: "Best for cash" } };
+  var MQ_MODES = { xp: { w: 1, label: "XP", title: "Best for XP" }, balanced: { w: 0.5, label: "Balanced", title: "Best balanced" }, cash: { w: 0, label: "Cash", title: "Best for cash" }, stats: { w: null, label: "Stats", title: "Best for stats" } };
+  // Stats mode: what a mission adds to your stats per energy. Cash buys stat points at 1,500 each; XP is counted through levels,
+  // one level being worth about LV_POINTS bought points (3 free points, plus being harder to hit for lower levels, minus the crit
+  // chance a level spreads thin). So score = cash/e + xp/e × LV_POINTS × 1,500 / XP the next level needs. The game's level curve:
+  // from level 9 up, level L to L+1 takes 0.55 × L^(2.6064 + 0.01349 × ln L) XP.
+  var LV_POINTS = 33, STAT_PRICE = 1500, XP_LOW = [0, 0, 5, 11, 24, 48, 90, 156, 253, 389];
+  function xpStep(L) { return L < 9 ? XP_LOW[L + 1] - XP_LOW[L] : 0.55 * Math.pow(L, 2.6064 + 0.01349 * Math.log(L)); }
+  function levelOfXp(xp) { var L = 1, need = 0; while (L < 2000 && Math.floor(need + xpStep(L)) <= xp) { need += xpStep(L); L++; } return L; }
+  function statsXpWeight() {
+    var me = duelMe(), L = me && typeof me.xp === "number" ? levelOfXp(me.xp) : 0;
+    return L ? { L: L, k: LV_POINTS * STAT_PRICE / xpStep(L) } : null;
+  }
   var MQ_TIERS = { cash: ["Item", "", false], gold1: ["Gold", "#c9961a", false], gold2: ["Gold II", "#c9961a", false], gold3: ["Gold III", "#c9961a", false], epic1: ["Epic", "#e0524f", true], epic2: ["Epic II", "#e0524f", true], legendary: ["Legendary", "#9b5fd0", true], unique: ["Unique", "#2fa3d6", true] };
   var missions = [], mqItems = null, mqItemsLoading = false;
   function mqNice(g) { return MQ_NAMES[g] || String(g || "Mission").split("_").map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(" "); }
@@ -3292,10 +3306,12 @@ function reporter() {
   function mqMode() { try { var m = JSON.parse(localStorage.getItem("mr-reader") || "{}").mode; return MQ_MODES[m] ? m : "balanced"; } catch (e) { return "balanced"; } }
   function setMqMode(mode) { try { var o = JSON.parse(localStorage.getItem("mr-reader") || "{}"); o.mode = mode; localStorage.setItem("mr-reader", JSON.stringify(o)); } catch (e) {} }
   function mqRank(mode) {
-    var w = MQ_MODES[mode].w, maxX = 0, maxC = 0, r = { bx: null, bc: null, bs: null };
-    missions.forEach(function (m) { m.xpr = m.xp / m.energy; m.cr = m.cash / m.energy; maxX = Math.max(maxX, m.xpr); maxC = Math.max(maxC, m.cr); });
+    var w = MQ_MODES[mode].w, maxX = 0, maxC = 0, maxV = 0, r = { bx: null, bc: null, bs: null }, sw = w === null ? statsXpWeight() : null;
+    if (w === null && !sw) { w = 0.5; } // your level isn't known yet: rank as Balanced until it is
+    missions.forEach(function (m) { m.xpr = m.xp / m.energy; m.cr = m.cash / m.energy; m.val = sw ? m.cr + sw.k * m.xpr : 0; maxX = Math.max(maxX, m.xpr); maxC = Math.max(maxC, m.cr); maxV = Math.max(maxV, m.val); });
+    r.sw = sw;
     missions.forEach(function (m) {
-      m.score = (w * (maxX ? m.xpr / maxX : 0) + (1 - w) * (maxC ? m.cr / maxC : 0)) * 100;
+      m.score = sw ? (maxV ? m.val / maxV * 100 : 0) : (w * (maxX ? m.xpr / maxX : 0) + (1 - w) * (maxC ? m.cr / maxC : 0)) * 100;
       if (!r.bx || m.xpr > r.bx.xpr) { r.bx = m; }
       if (!r.bc || m.cr > r.bc.cr) { r.bc = m; }
       if (!r.bs || m.score > r.bs.score) { r.bs = m; }
@@ -3360,6 +3376,7 @@ function reporter() {
       return "<button type='button' data-mqmode='" + k + "'" + (k === mode ? " class='on'" : "") + ">" + MQ_MODES[k].label + "</button>";
     }).join("") + "</span></div><div class='pick'>" + esc(r.bs.name) + "</div>" + missionStatusHtml(r.bs)
       + "<div class='lead'>Most XP per energy: <b class='x'>" + esc(r.bx.name) + "</b> · Most cash per energy: <b class='c'>" + esc(r.bc.name) + "</b></div>"
+      + (mode === "stats" ? "<div class='mqnote' style='margin:2px 0 6px'>" + (r.sw ? "Score = cash/E + XP/E × " + r.sw.k.toFixed(2) + ". At level " + r.sw.L + " a level is worth about " + LV_POINTS + " stat points (" + (LV_POINTS * STAT_PRICE).toLocaleString("en-US") + " cash) and takes " + Math.round(xpStep(r.sw.L)).toLocaleString("en-US") + " XP." + (function () { var tie = missions.filter(function (m) { return m !== r.bs && m.score >= 98; }).map(function (m) { return m.name; }); return tie.length ? " " + r.bs.name + " and " + tie.join(" and ") + " are practically tied: pick either." : ""; })() : "Your level isn't known yet, so this ranks like Balanced for now.") + "</div>" : "")
       + "<table class='mq'><thead><tr><th>Mission</th><th>Energy</th><th>XP/E</th><th>Cash/E</th><th>Score</th></tr></thead><tbody>";
     var meNow = duelMe(), energyNow = meNow && typeof meNow.energy === "number" ? meNow.energy : null;
     missions.forEach(function (m) {
