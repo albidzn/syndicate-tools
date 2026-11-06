@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.31.0
+// @version      2.32.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.31.0";
+  var VERSION = "2.32.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.32.0": [
+      "Leaderboard: the honor rank column also shows each member's honor (like #37 · 334k), refreshed every 30 minutes."
+    ],
     "2.31.0": [
       "Mission picker: new Stats mode, ranking missions by how much they add to your stats per energy (cash plus XP, weighted for your level)."
     ],
@@ -1479,7 +1482,13 @@ function reporter() {
     }
     function rankColumn() { // best (lowest) place in the game's ranking first
       var rows = list.filter(function (m) { return m.pos > 0; }).sort(function (a, b) { return a.pos - b.pos; });
-      return rows.length ? rows.map(function (m, i) { return medal(i) + " **" + md(m.name) + "** #" + m.pos.toLocaleString("en-US"); }).join("\n").slice(0, 1024) : "Nothing yet.";
+      var hon = s.memHonor || {};
+      var out = ""; // whole lines only, within Discord's 1,024 characters a field
+      rows.forEach(function (m, i) {
+        var line = medal(i) + " **" + md(m.name) + "** #" + m.pos.toLocaleString("en-US") + (hon[m.id] != null ? " · " + shortHonor(hon[m.id]) : "");
+        if (out.length + line.length + 1 <= 1024) { out += (out ? "\n" : "") + line; }
+      });
+      return out || "Nothing yet.";
     }
     return {
       username: "Syndicate Leaderboard",
@@ -1494,7 +1503,7 @@ function reporter() {
           { name: "🎖️ Honor rank", value: rankColumn(), inline: true },
           { name: "🪙 Gold donated", value: column("gold", true), inline: true }
         ].concat(recordsField(s, list) || []),
-        footer: { text: "Week = " + shortDay(ws) + " to Sunday · game days start 00:00 UTC (1 AM German time) · honor rank = place in the game's player ranking · gold = all time\nUpdates by itself while a leader has the game open." },
+        footer: { text: "Week = " + shortDay(ws) + " to Sunday · game days start 00:00 UTC (1 AM German time) · honor rank = place in the game's player ranking, then honor · gold = all time\nUpdates by itself while a leader has the game open." },
         timestamp: new Date().toISOString()
       }]
     };
@@ -1510,9 +1519,35 @@ function reporter() {
     });
     if (changed) { save(s); }
   }
+  // Members' honor for the leaderboard. The family list only has each member's place in the ranking, so their honor comes
+  // from the game's player search, one member at a time. Only on the PC posting the leaderboard, every 30 minutes.
+  // s.memHonor = {member id: honor}, s.memHonorAt = when the last round finished.
+  var HONOR_EVERY = 30 * 60 * 1000, honorRun = false;
+  function refreshMemberHonor(s) {
+    if (!s.boardHook || !last || honorRun || Date.now() - (s.memHonorAt || 0) < HONOR_EVERY) { return; }
+    var list = members(last.fam).filter(function (m) { return m.pos > 0; }), got = {};
+    if (!list.length) { return; }
+    honorRun = true;
+    playerRanking().then(function (fn) {
+      return list.reduce(function (chain, m, i) {
+        return chain.then(function () { return i ? wait(SCAN_GAP) : null; }).then(function () { return fn({ data: { search: m.name } }); }).then(function (d) {
+          var hit = (d && d.players || []).filter(function (x) { return x.name === m.name; })[0];
+          if (hit && +hit.honor >= 0) { got[m.id] = +hit.honor; }
+        }, function () {});
+      }, Promise.resolve());
+    }).then(function () {
+      var n = load();
+      if (Object.keys(got).length) { n.memHonor = got; boardNext = 0; }
+      n.memHonorAt = Date.now(); save(n);
+    }, function () { var n = load(); n.memHonorAt = Date.now(); save(n); }).then(function () { honorRun = false; });
+  }
+  function shortHonor(h) {
+    return h >= 1e6 ? (h / 1e6).toFixed(h >= 1e7 ? 1 : 2).replace(/\.?0+$/, "") + "M" : h >= 1e3 ? Math.round(h / 1e3) + "k" : String(h);
+  }
   function updateBoard() {
     trackRanks();
     var s = load();
+    refreshMemberHonor(s);
     if (!s.boardHook || !last || boardBusy || Date.now() < boardNext) { return; }
     if (last.at < dayStart(Date.now())) { return; } // yesterday's numbers would show as today's
     var payload = buildBoard(s, last.fam), sig = JSON.stringify(payload.embeds[0].fields) + payload.embeds[0].description;
