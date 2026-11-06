@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.28.2
+// @version      2.29.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.28.2";
+  var VERSION = "2.29.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.29.0": [
+      "Recruits tab: a Message button sends your recruiting message (Discord invite and the 100 activity rule) to a player through the game's mail. Edit the text with Edit message."
+    ],
     "2.28.2": [
       "Voice reminders for gang war, survival, wanted and the shops now only speak for the city you're in."
     ],
@@ -2324,12 +2327,70 @@ function reporter() {
       job.error = "Stopped after " + job.done + " of " + job.total + " invitations." + skippedNote(job) + " The game said: " + (e && e.message || e);
     }).then(function () { job.running = false; job.current = ""; refreshFamily(); redraw(); });
   }
+  // ----- A message to a searching player, through the game's own mail ("Write" tab: {to: name, message}, at most 450 characters).
+  // Its request is rebuilt like the mailbox's. The text is the leader's own (s.recruitMsg, s.recruitDiscord), kept on this PC only.
+  // s.messaged = {player id: {name, at}}: one message per player a week, sent one at a time by clicking, never in bulk.
+  var RMSG_DEFAULT = "Hi {name}! {family} is recruiting and we'd like you with us. We ask for 100 activity points a day, and everyone joins our Discord: {discord} Reply here if you're interested.";
+  var RMSG_MAX = 450, RMSG_DAYS = 7, msgFn = null, msgBusy = {}, rmsgOpen = false;
+  function messageFn() {
+    if (msgFn) { return Promise.resolve(msgFn); }
+    var res = performance.getEntriesByType("resource").map(function (e) { return e.name; });
+    var csf = res.filter(function (n) { return /\/assets\/createServerFn-[\w-]+\.js/.test(n); })[0], idx = res.filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
+    if (!csf || !idx) { return Promise.reject(new Error("the game's files weren't found, reload the game and try again")); }
+    return Promise.all([import(csf), fetch(idx).then(function (r) { return r.text(); })]).then(function (got) {
+      var mod = got[0], file = (got[1].match(/(?:^|[^\w-])(mail-[\w-]+\.js)/) || [])[1];
+      if (!file) { throw new Error("the mail page wasn't found in the game's files"); }
+      return fetch(idx.replace(/index-[\w-]+\.js.*$/, file)).then(function (r) { return r.text(); }).then(function (t) {
+        var name = (t.match(/mutationFn:([\w$]+),retry:!1,onError:[^]{0,200}?Your message has been sent/) || [])[1], id = null, rpc = null, make = null;
+        if (name) { id = (t.match(new RegExp("[^\\w$]" + name.replace(/\$/g, "\\$") + "=[\\w$]+\\(\\{method:`POST`\\}\\)\\.handler\\([\\w$]+\\(`([0-9a-f]{64})`\\)\\)")) || [])[1]; }
+        Object.keys(mod).forEach(function (k) {
+          var f = mod[k], src = typeof f === "function" ? String(f) : "";
+          if (src.indexOf("/_serverFn/") >= 0) { rpc = f; } else if (src.indexOf("inputValidator") >= 0) { make = f; }
+        });
+        if (!id || !rpc || !make) { throw new Error("the game's message request wasn't found (the game may have changed)"); }
+        msgFn = make({ method: "POST" }).handler(rpc(id));
+        return msgFn;
+      });
+    });
+  }
+  function recruitMsgFor(s, p) {
+    return (s.recruitMsg || RMSG_DEFAULT).split("{name}").join(p.name).split("{family}").join(last && last.fam && last.fam.name || "Our family")
+      .split("{discord}").join(s.recruitDiscord || "").replace(/[ \t]+/g, " ").trim();
+  }
+  function recruitMsgProblem(s) {
+    if ((s.recruitMsg || RMSG_DEFAULT).indexOf("{discord}") >= 0 && !s.recruitDiscord) { return "Add your Discord invite link first, under Edit message."; }
+    if (recruitMsgFor(s, { name: "xxxxxxxxxxxxxxxxxxxx" }).length > RMSG_MAX) { return "The message is too long for the game, which takes " + RMSG_MAX + " characters. Shorten it under Edit message."; }
+    return "";
+  }
+  function messagedOf(s, p) { var m = s.messaged && s.messaged[p.id]; return m && Date.now() - m.at < RMSG_DAYS * DAY ? m : null; }
+  function messageOne(id) {
+    var s = load(), p = recruitList(s, true).filter(function (x) { return String(x.id) === id; })[0], bad = recruitMsgProblem(s);
+    if (!p || msgBusy[id]) { return; }
+    if (bad) { alert(bad); rmsgOpen = true; redraw(); return; }
+    msgBusy[id] = true; redraw();
+    messageFn().then(function (fn) { return fn({ data: { to: p.name, message: recruitMsgFor(s, p) } }); }).then(function () {
+      var n = load(), now = Date.now();
+      n.messaged = n.messaged || {}; n.messaged[p.id] = { name: p.name, at: now };
+      Object.keys(n.messaged).forEach(function (k) { if (now - n.messaged[k].at > 30 * DAY) { delete n.messaged[k]; } });
+      save(n);
+    }, function (e) { alert("Couldn't message " + p.name + ": " + (e && e.message || e)); })
+      .then(function () { delete msgBusy[id]; redraw(); });
+  }
+  function recruitMsgHtml(s) {
+    var text = s.recruitMsg || RMSG_DEFAULT, sample = recruitMsgFor(s, { name: "PlayerName" }), bad = recruitMsgProblem(s);
+    return "<div class='setup'><b>✉️ Recruiting message</b>"
+      + "<div class='row filters'><label>Discord invite <input type='text' data-rdisc value='" + esc(s.recruitDiscord || "") + "' placeholder='https://discord.gg/…' spellcheck='false' autocomplete='off' style='min-width:220px'></label></div>"
+      + "<textarea data-rmsg rows='4' maxlength='" + RMSG_MAX + "' spellcheck='true' style='width:100%;box-sizing:border-box;margin:4px 0;padding:7px 8px;border-radius:6px;border:1px solid var(--strong);background:var(--input);color:var(--fg);font:inherit;font-size:12px;resize:vertical'>" + esc(text) + "</textarea>"
+      + "<div style='font-size:11.5px;color:var(--muted)'>{name} becomes the player's name, {family} the family's name and {discord} your invite link. With a 10-letter name it's " + sample.length + " of " + RMSG_MAX + " characters. Use a Discord invite that never expires.</div>"
+      + (bad ? "<div class='st bad'>" + esc(bad) + "</div>" : "")
+      + "<div class='row'>" + (s.recruitMsg ? "<button type='button' data-rmsgreset>Reset text</button>" : "") + "<button type='button' data-rmsgopen>Done</button></div></div>";
+  }
   function skippedNote(job) {
     return job.skipped ? " " + job.skipped + " skipped: no longer searching (removed from the list)." : "";
   }
   function recruitHtml(s) {
     var r = s.recruits, f = recruitFilter(s), list = recruitList(s), h = "";
-    h += "<div class='st'>Players in the ranking marked <b>looking for a family</b>. Click a name to copy it.</div>";
+    h += "<div class='st'>Players in the ranking marked <b>looking for a family</b>. Click a name to copy it, or send them your recruiting message.</div>";
     var wk = weakest(s).rows.slice(0, 2), seats = seatsLine(last.fam);
     if (seats || wk.length) { h += "<div class='st'>" + esc(seats) + (wk.length ? " Weakest now: " + wk.map(function (r) { return "<b>" + esc(r.m.name) + "</b>"; }).join(", ") + ". <button type='button' data-ranks>See why</button>" : "") + "</div>"; }
     if (recruiting && recruiting.running) { h += "<div class='st wait'>" + esc(recruiting.step) + "</div>"; }
@@ -2353,21 +2414,26 @@ function reporter() {
     h += "<div class='row'><button type='button' class='go' data-rscan" + (recruiting && recruiting.running ? " disabled" : "") + ">" + (r ? "Scan again" : "Find recruits") + "</button>"
       + (open ? "<button type='button' data-inviteall" + (job && job.running ? " disabled" : "") + ">Invite all (" + open + ")</button>" : "")
       + (list.length ? "<button type='button' data-copyall>Copy all names</button>" : "")
+      + "<button type='button' data-rmsgopen>" + (rmsgOpen ? "Close message" : "Edit message") + "</button>"
       + (list.length && s.webhook ? "<button type='button' data-postrecruits>Post to leadership chat</button>" : "") + "</div>";
+    if (rmsgOpen) { h += recruitMsgHtml(s); }
     if (r) {
       h += "<div class='st'>" + list.length + " of " + Object.keys(r.list.reduce(function (o, p) { o[p.id] = 1; return o; }, {})).length + " searching players shown · scanned " + clock(r.at)
         + (Date.now() - r.at > 3600000 ? " (over an hour ago)" : "") + ", " + r.total.toLocaleString("en-US") + " players checked.</div>";
-      h += "<table><thead><tr><th>Rank</th><th>Name</th><th>Class</th><th>Level</th><th>Honor</th><th title='Levels and honor gained since the scans first saw them searching'>Growth</th><th></th><th></th></tr></thead><tbody>"
+      h += "<table><thead><tr><th>Rank</th><th>Name</th><th>Class</th><th>Level</th><th>Honor</th><th title='Levels and honor gained since the scans first saw them searching'>Growth</th><th></th><th></th><th></th></tr></thead><tbody>"
         + (list.length ? list.map(function (p) {
           var g = growth(s, p), gt = !g || g.days < 0.5 ? "<span class='idle'>new</span>" : (g.lv > 0 ? "+" + g.lv + " lv " : "") + (g.honor > 0 ? "+" + g.honor + " hon " : "") + (g.lv <= 0 && g.honor <= 0 ? "– " : "") + "<span class='idle'>" + Math.round(g.days) + "d</span>";
           var inv = inviteOf(s, p, news), busyNow = inviteBusy[p.id] || job && job.running && job.current === p.name;
           var it = busyNow ? "<span class='idle'>sending…</span>"
             : inv ? "<span class='invd' title='Invited " + (inv.by ? "by " + esc(inv.by) + " " : "") + new Date(inv.at).toLocaleString() + ". Invitations last " + INVITE_DAYS + " days.'>✉ invited " + ago(inv.at) + "</span>"
             : "<button type='button' class='inv' data-invite='" + esc(p.id) + "'" + (job && job.running ? " disabled" : "") + ">Invite</button>";
+          var msgd = messagedOf(s, p), mt = msgBusy[p.id] ? "<span class='idle'>sending…</span>"
+            : msgd ? "<span class='invd' title='Messaged " + new Date(msgd.at).toLocaleString() + ". The button comes back after " + RMSG_DAYS + " days.'>✉ messaged " + ago(msgd.at) + "</span>"
+            : "<button type='button' class='inv' data-rmsgsend='" + esc(p.id) + "' title='Sends your recruiting message to " + esc(p.name) + " through the game&#39;s mail'>Message</button>";
           return "<tr" + (inv ? " class='done'" : "") + "><td>" + (p.rank || "") + "</td><td><button type='button' class='name' data-copy='" + esc(p.name) + "' title='Copy name'>" + esc(p.name)
             + (copied === p.name ? " <span class='idle'>copied ✓</span>" : "") + "</button></td><td>" + esc(SPECS[p.spec] || p.spec || "?") + "</td><td>" + p.level + "</td><td>" + p.honor.toLocaleString("en-US") + "</td>"
-            + "<td" + (g && g.lv > 0 ? " class='up'" : "") + ">" + gt + "</td><td>" + it + "</td><td><a href='/game/player/" + encodeURIComponent(p.id) + "' title='Open profile'>👤</a></td></tr>";
-        }).join("") : "<tr><td colspan='8' style='text-align:center'>Nobody matches these filters.</td></tr>")
+            + "<td" + (g && g.lv > 0 ? " class='up'" : "") + ">" + gt + "</td><td>" + it + "</td><td>" + mt + "</td><td><a href='/game/player/" + encodeURIComponent(p.id) + "' title='Open profile'>👤</a></td></tr>";
+        }).join("") : "<tr><td colspan='9' style='text-align:center'>Nobody matches these filters.</td></tr>")
         + "</tbody></table>";
       h += "<div class='st'>Growth: other players' activity points aren't visible, so the scans compare level and honor over time instead. "
         + (s.webhook && s.recruitAlert !== false ? "While the game is open, the scan repeats every " + RECRUIT_EVERY / HOUR + " hours by itself." : "") + "</div>";
@@ -4420,6 +4486,8 @@ function reporter() {
     if (t && t.hasAttribute && t.hasAttribute("data-elvoice")) { var sw = load(); sw.elVoice = t.value; save(sw); elPausedUntil = 0; elSetNote(""); elPreview(t.value); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-elcap")) { var sl = load(); sl.elCap = Math.max(0, parseInt(t.value, 10) || 0); save(sl); t.blur(); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-ra")) { var s0 = load(); s0.recruitAlertMin = Math.max(0, parseInt(t.value, 10) || 0); save(s0); t.blur(); redraw(); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-rmsg")) { var sm = load(), txt = t.value.trim(); if (txt && txt !== RMSG_DEFAULT) { sm.recruitMsg = txt; } else { delete sm.recruitMsg; } save(sm); t.blur(); redraw(); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-rdisc")) { var sd = load(), link = t.value.trim(); if (link) { sd.recruitDiscord = link; } else { delete sd.recruitDiscord; } save(sd); t.blur(); redraw(); return; }
     if (!k) { return; }
     var s = load(), rf = recruitFilter(s);
     rf[k] = Math.max(0, parseInt(t.value, 10) || 0);
@@ -4510,6 +4578,9 @@ function reporter() {
     }
     if (t.hasAttribute("data-copy")) { var nm = t.getAttribute("data-copy"); copyText(nm); copied = nm; redraw(); setTimeout(function () { if (copied === nm) { copied = ""; redraw(); } }, 2000); return; }
     if (t.hasAttribute("data-invite")) { inviteOne(t.getAttribute("data-invite")); return; }
+    if (t.hasAttribute("data-rmsgsend")) { messageOne(t.getAttribute("data-rmsgsend")); return; }
+    if (t.hasAttribute("data-rmsgopen")) { rmsgOpen = !rmsgOpen; redraw(); return; }
+    if (t.hasAttribute("data-rmsgreset")) { delete s.recruitMsg; save(s); redraw(); return; }
     if (t.hasAttribute("data-inviteall")) { inviteAll(); return; }
     if (t.hasAttribute("data-invstop")) { if (inviteJob) { inviteJob.running = false; } redraw(); return; }
     if (t.hasAttribute("data-copyall")) { copyText(recruitList(s).map(function (p) { return p.name; }).join("\n")); alert("Copied " + recruitList(s).length + " names, one per line."); return; }
@@ -5750,7 +5821,7 @@ function reporter() {
     if (closed || path !== PAGE && path !== BAR && path !== DUELS && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
     loadOwnFamily(path);
     if (drag) { return; }
-    if (box && document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") { return; } // don't wipe what's being typed
+    if (box && document.activeElement && box.contains(document.activeElement) && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) { return; } // don't wipe what's being typed
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
