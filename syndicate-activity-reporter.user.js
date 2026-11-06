@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.32.1
+// @version      2.33.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.32.1";
+  var VERSION = "2.33.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.33.0": [
+      "Mission picker: when a mission gives an item, it's checked against your stats and says whether it's worth it (how much stronger it makes you, or that what you have is better), with the stats it adds or loses."
+    ],
     "2.32.1": [
       "Leaderboard: honor moved out of the honor rank column into a new Most honor record (the most any member has reached, plus today's leader if that's someone else)."
     ],
@@ -3194,7 +3197,7 @@ function reporter() {
     + "#ID button.icon{padding:4px 7px;font-size:13px;line-height:1}#ID button.vol{font-size:12px;white-space:nowrap}"
     + "#ID .volrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}#ID .volrow input{flex:1;margin:0;padding:0;border:0;background:none;accent-color:var(--accent);cursor:pointer}#ID .volrow .vv{min-width:34px;text-align:right;color:var(--fg)}"
     + "#ID button.tag.away{border:0;font:400 10px/1.5 system-ui,sans-serif;letter-spacing:0;text-transform:none;padding:0 6px;border-radius:9px;cursor:pointer;background:rgba(124,196,255,.14);color:#9fd2ff}#ID table.mem td.tg{position:relative}#ID button.awaybtn{position:absolute;left:-16px;top:50%;transform:translateY(-50%);border:0;background:none;padding:0 2px;font-size:11px;line-height:1;cursor:pointer;opacity:0}#ID tr:hover .awaybtn{opacity:.55}#ID .awaybtn:hover{opacity:1}"
-    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .golink{color:var(--accent);font-weight:600}#ID table.dq th.here{background:var(--accent);color:var(--on-accent);border-radius:6px 6px 0 0}#ID table.dq td.here{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--fg);font-weight:600}#ID a.mrun{position:relative;display:flex;justify-content:space-between;align-items:center;gap:8px;height:22px;margin-top:8px;padding:0 8px;border-radius:6px;overflow:hidden;background:var(--soft);color:var(--fg);font-size:12px;text-decoration:none}#ID a.mrun:hover{outline:1px solid var(--accent)}#ID .mfill{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.38;transition:width 1s linear}#ID a.mrun.ready .mfill{background:#6bb133}#ID .mtxt,#ID .mleft{position:relative;white-space:nowrap}#ID .mleft{font-weight:600;font-variant-numeric:tabular-nums}#ID .mqstat{margin:0 0 5px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted)}#ID .mqstat b{color:var(--fg);font-weight:600}#ID .mqstat.warn,#ID .mqstat.warn b{color:#e8c46a}#ID .mqstat.ok,#ID .mqstat.ok b{color:#93d36d}#ID .lvline{margin:0 0 6px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted);cursor:help}#ID .lvline b{color:var(--fg);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
+    + "#ID .msrow{display:flex;align-items:center;gap:6px;margin:8px 0 2px}#ID input.msearch{flex:1;min-width:0;width:auto;margin:0;font-family:inherit}#ID .seg.area button{padding:5px 9px;letter-spacing:.02em;white-space:nowrap}#ID .pick{font:normal 28px/1.1 Impact,'Arial Narrow',sans-serif;color:var(--accent);margin:2px 0 4px}#ID .mqhead{display:flex;align-items:center;gap:8px;margin:10px 0 6px}#ID .lead{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .lead b.x{color:var(--up)}#ID .lead b.c{color:#93d36d}#ID table.mq th:nth-child(2),#ID table.mq td:nth-child(2){text-align:right}#ID table.mq td{padding:6px;vertical-align:top}#ID table.mq th:first-child,#ID table.mq td:first-child{text-align:left;color:var(--fg)}#ID table.mq th:first-child{color:var(--muted)}#ID table.mq td.x{color:var(--up);font-weight:700}#ID table.mq td.c{color:#93d36d;font-weight:700}#ID table.mq tr.best td{background:color-mix(in srgb,var(--accent) 10%,transparent)}#ID table.mq tr.rare td{background:color-mix(in srgb,var(--c) 13%,transparent)}#ID table.mq tr.best td:first-child{box-shadow:inset 3px 0 0 var(--accent)}#ID table.mq tr.best .nm{font-weight:700}#ID table.mq tr.best td.sc{color:var(--accent);font-weight:700}#ID .ib{display:inline-block;margin-left:6px;padding:0 6px;border-radius:999px;font:700 9px/1.6 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--c);color:var(--c);vertical-align:1px}#ID .ib.rare{background:var(--c);color:#fff;animation:synGlow 1.6s ease-in-out infinite}@keyframes synGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 9px 2px var(--c)}}@media (prefers-reduced-motion:reduce){#ID .ib.rare{animation:none}}#ID .mqitem{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}#ID .mqitem img{width:38px;height:22px;object-fit:contain;background:var(--fg);border-radius:4px;padding:2px}#ID .mqrate{margin-top:4px;font-size:11.5px;line-height:1.35;color:var(--muted);cursor:help}#ID .mqrate b{display:block;font-weight:700;color:var(--fg)}#ID .mqrate.up b{color:#93d36d}#ID .mqrate.down b{color:#ff8a8a}#ID .golink{color:var(--accent);font-weight:600}#ID table.dq th.here{background:var(--accent);color:var(--on-accent);border-radius:6px 6px 0 0}#ID table.dq td.here{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--fg);font-weight:600}#ID a.mrun{position:relative;display:flex;justify-content:space-between;align-items:center;gap:8px;height:22px;margin-top:8px;padding:0 8px;border-radius:6px;overflow:hidden;background:var(--soft);color:var(--fg);font-size:12px;text-decoration:none}#ID a.mrun:hover{outline:1px solid var(--accent)}#ID .mfill{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.38;transition:width 1s linear}#ID a.mrun.ready .mfill{background:#6bb133}#ID .mtxt,#ID .mleft{position:relative;white-space:nowrap}#ID .mleft{font-weight:600;font-variant-numeric:tabular-nums}#ID .mqstat{margin:0 0 5px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted)}#ID .mqstat b{color:var(--fg);font-weight:600}#ID .mqstat.warn,#ID .mqstat.warn b{color:#e8c46a}#ID .mqstat.ok,#ID .mqstat.ok b{color:#93d36d}#ID .lvline{margin:0 0 6px;padding:5px 8px;border-radius:8px;background:var(--soft);font-size:12px;color:var(--muted);cursor:help}#ID .lvline b{color:var(--fg);font-weight:600}#ID .dqhead{display:flex;align-items:center;gap:8px;margin:8px 0 6px;font-size:12px;color:var(--muted)}#ID .dqfacts{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .dqfacts b{color:var(--fg);font-weight:600}#ID table.dq td,#ID table.dq th{padding:5px 6px}#ID table.dq td.nm2{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ID .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}#ID .cico{width:15px;height:15px;object-fit:contain;margin-right:5px;vertical-align:-3px}#ID table.dq td.w{font-weight:700}#ID table.dq td.w.hi{color:#93d36d}#ID table.dq td.w.md{color:#e8c46a}#ID table.dq td.w.lo{color:#ff8a8a}#ID table.dq tr.below td:not(.w){opacity:.65}#ID table.dq a.fight{color:var(--accent);font-weight:600;white-space:nowrap;text-decoration:none}#ID table.dq a.fight:hover{text-decoration:underline}#ID .mqnote{margin-top:6px;font-size:11px;color:var(--muted)}#ID .remind{display:flex;align-items:center;gap:8px;margin:6px 0 2px;font-size:11px;color:var(--muted)}"
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}#ID .seg button.on{background:var(--accent);color:var(--on-accent)}"
     + "#ID .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}"
     // The game's hover boxes are placed against the whole window, so they can land on the panel: they go on top. Its dialogs stay below, as before.
@@ -3327,7 +3330,7 @@ function reporter() {
     var q = client && client.getQueryCache().find({ queryKey: ["getAvailableQuests"] }), got = q ? mqPick(q.state.data, 0) : [];
     if (!got.length) { return; }
     missions = got.map(function (m) {
-      return { id: m.id, name: mqNice(m.giver), energy: m.energy, xp: m.xp || 0, cash: m.cash || 0, item: m.item && m.item.id ? { id: String(m.item.id), tier: m.item.tier || "" } : null };
+      return { id: m.id, name: mqNice(m.giver), energy: m.energy, xp: m.xp || 0, cash: m.cash || 0, item: m.item && m.item.id ? { id: String(m.item.id), tier: m.item.tier || "", raw: m.item } : null };
     }).filter(function (m) { return m.energy > 0; });
     if (missions.some(function (m) { return m.item; })) { loadMqItems(); }
   }
@@ -3349,6 +3352,91 @@ function reporter() {
   function mqItemInfo(it) {
     var def = mqItems && mqItems[it.id] || {}, tier = MQ_TIERS[it.tier] || [it.tier ? mqNice(it.tier) : "Item", "", false];
     return { name: def.name || mqNice(it.id), img: def.img || "", label: tier[0], color: tier[1] || "var(--muted)", rare: tier[2] };
+  }
+  // Is a mission's item worth having? It's rated like a fight: you with the item against you as you are now, with the game's own
+  // fight code. Each side's strength is its life × its average hit on the other (hit chance, dodge, crits, extra shots), so the rating
+  // is how much stronger the item makes you. Equipment is rated against what's in that slot, a weapon against the one you fight with
+  // (the game always fights with your best), a skill or accessory as an extra in your combat grid, food as if you ate it now.
+  // Stuns, heals and thrown items aren't in the rating; their stats are still listed. The item table and the game's own
+  // "compared with what you have" stats come from its ItemImg file.
+  var itemKit = null, itemKitLoading = false, itemKitError = "", itemRates = {}, ITEM_RATE_MIN = 0.005;
+  var ITEM_STAT_NAMES = { attack: "attack", endurance: "endurance", luck: "luck", toughness: "toughness", attackBuffPerc: "attack", enduranceBuffPerc: "endurance", luckBuffPerc: "luck", toughnessBuffPerc: "toughness",
+    minDamage: "min damage", maxDamage: "max damage", accuracy: "accuracy", accuracyBuffPerc: "accuracy", critChanceBuffPerc: "crit chance", critDamageBuffPerc: "crit damage", damageBuffPerc: "damage",
+    defenseBuffPerc: "defense", damageResistancePerc: "damage resistance", dodgeBuffPerc: "dodge", hitChanceReductionPerc: "harder to hit", doubleShotChanceBuffPerc: "extra shot", firstBlowBuffPerc: "first strike",
+    healBuffPerc: "healing", damageVsBullyPerc: "damage vs bullies", damageVsTacticianPerc: "damage vs tacticians", damageVsRoguePerc: "damage vs rogues", stunChancePerc: "stun chance",
+    healOnAttackChancePerc: "heal-on-hit chance", healOnAttackPerc: "heal on hit", explosionResistancePerc: "explosion resistance" };
+  var ITEM_STAT_SKIP = { durationDays: 1, usedAt: 1, accuracyDebuffRounds: 1, damageDebuffRounds: 1, defenseBuffRounds: 1 };
+  function itemTools() {
+    if (itemKit) { return Promise.resolve(itemKit); }
+    var url = performance.getEntriesByType("resource").map(function (e) { return e.name; }).filter(function (n) { return /\/assets\/ItemImg-[\w-]+\.js/.test(n); })[0];
+    if (!url) { return Promise.reject(new Error("the game's item file wasn't found, reload the game and try again")); }
+    return Promise.all([duelTools(), import(url)]).then(function (got) {
+      var kit = { fight: got[0], table: null, deltaOf: null };
+      Object.keys(got[1]).forEach(function (k) {
+        var v = got[1][k], src = typeof v === "function" ? String(v) : "", first = v && typeof v === "object" ? v[Object.keys(v)[0]] : null;
+        if (/\.equipment\[/.test(src) && /\.combat\b/.test(src)) { kit.deltaOf = v; }
+        if (first && typeof first === "object" && first.type && Object.keys(v).length > 100) { kit.table = v; }
+      });
+      if (!kit.table || !kit.deltaOf || !kit.fight.fighter || !kit.fight.damage || !kit.fight.stats) { throw new Error("the game's item code wasn't recognised (the game may have changed)"); }
+      itemKit = kit;
+      return kit;
+    });
+  }
+  // You, with the item put where the game would use it. null for an item that isn't worn, eaten or in the combat grid.
+  function meWithItem(def, me, item, at) {
+    var c = Object.assign({}, me, { id: "syn-item-check" });
+    if (def.type === "equipment") { c.equipment = Object.assign({}, me.equipment); c.equipment[def.kind] = item; return c; }
+    if (def.type === "food") { c.food = (me.food || []).concat([{ item: Object.assign({}, item, { usedAt: new Date(at).getTime() }) }]); return c; }
+    if (def.type === "weapon" || def.type === "skill" || def.type === "accessory" || def.type === "consumable" && def.kind === "ammo") { c.combat = (me.combat || []).concat([{ x: -1, y: -1, item: item }]); return c; }
+    return null;
+  }
+  function itemStatText(k, v) {
+    var name = ITEM_STAT_NAMES[k] || k.replace(/Perc$|Buff/g, "").replace(/([A-Z])/g, " $1").toLowerCase().trim();
+    var n = /Perc$/.test(k) || k === "accuracy" ? +(Math.abs(v) * 100).toFixed(1) + "%" : Math.abs(Math.round(v)).toLocaleString("en-US");
+    return (v > 0 ? "+" : "−") + n + " " + name;
+  }
+  // {gain: how much stronger (0.04 = 4%), changes: ["+120 attack", ...], days, kind, slot, unused} or {error}.
+  function itemRating(item) {
+    var me = duelMe();
+    if (!me || !itemKit) { return null; }
+    var key = JSON.stringify([item, me.xp, me.attack, me.endurance, me.luck, me.toughness, me.equipment, me.combat, me.food, Math.floor(Date.now() / 6e5)]);
+    if (itemRates[key]) { return itemRates[key]; }
+    var kit = itemKit.fight, at = new Date(), def = itemKit.table[item.id], r = { changes: [], days: 0, kind: def ? def.type : "", slot: def && def.kind ? String(def.kind).replace(/_/g, " ") : "" };
+    try {
+      if (!def) { throw new Error("the game doesn't know this item"); }
+      var d = itemKit.deltaOf(item, me) || {}, order = ["attack", "endurance", "luck", "toughness"];
+      Object.keys(d).sort(function (a, b) { var i = order.indexOf(a), j = order.indexOf(b); return (i < 0 ? 9 : i) - (j < 0 ? 9 : j); }).forEach(function (k) {
+        if (k === "durationDays") { r.days = d[k]; }
+        if (!ITEM_STAT_SKIP[k] && typeof d[k] === "number" && d[k]) { r.changes.push(itemStatText(k, d[k])); }
+      });
+      var two = meWithItem(def, me, item, at);
+      if (two) {
+        var now = kit.fighter(me, at), next = kit.fighter(two, at);
+        r.gain = next.life * hitDice(kit, next, now).avg / (now.life * hitDice(kit, now, next).avg) - 1;
+        r.unused = def.type === "weapon" && next.weapon !== item; // the game would keep fighting with your current weapon
+      }
+    } catch (e) { r.error = String(e && e.message || e); }
+    if (Object.keys(itemRates).length > 20) { itemRates = {}; }
+    itemRates[key] = r;
+    return r;
+  }
+  function itemRateHtml(it) {
+    if (!it.raw || typeof it.raw !== "object") { return ""; }
+    if (!itemKit && !itemKitError) {
+      if (!itemKitLoading) { itemKitLoading = true; itemTools().then(function () { itemKitLoading = false; redraw(); }, function (e) { itemKitLoading = false; itemKitError = String(e && e.message || e); redraw(); }); }
+      return "<div class='mqrate'>Checking it against your stats…</div>";
+    }
+    var r = itemKitError ? { error: itemKitError } : itemRating(it.raw);
+    if (!r) { return ""; }
+    if (r.error) { return "<div class='mqrate'>Couldn't check this item: " + esc(r.error) + ".</div>"; }
+    var g = r.gain, pct = g != null ? +(Math.abs(g) * 100).toFixed(1) + "%" : "", yours = r.kind === "equipment" && r.slot ? "your " + r.slot : r.kind === "weapon" ? "your weapon" : "what you have", cls = "", txt;
+    if (g == null) { txt = "Not rated: it isn't worn or used in fights"; }
+    else if (r.unused) { cls = "down"; txt = "▼ Not worth it: your weapon is better"; }
+    else if (g >= ITEM_RATE_MIN) { cls = "up"; txt = "▲ Worth it: +" + pct + " stronger" + (r.days ? " for " + r.days + " day" + (r.days === 1 ? "" : "s") : ""); }
+    else if (g <= -ITEM_RATE_MIN) { cls = "down"; txt = "▼ Not worth it: " + (r.kind === "food" ? "−" + pct + " weaker" : yours + " is better (−" + pct + ")"); }
+    else { txt = "≈ About the same as " + (r.kind === "food" ? "now" : yours); }
+    var tip = "You with this item against you as you are now, with the game's fight code: life × average hit. " + (r.kind === "food" ? "As if you ate it now, on top of the food you have going. " : r.kind === "equipment" ? "Compared with " + yours + ". " : r.kind === "weapon" ? "Compared with the weapon you fight with" + (r.unused ? ", which the game would keep using. " : ". ") : "") + "Stuns, heals and thrown items aren't counted.";
+    return "<div class='mqrate" + (cls ? " " + cls : "") + "' title=\"" + esc(tip) + "\"><b>" + esc(txt) + "</b>" + (r.changes.length ? "<span>" + esc((r.kind === "equipment" || r.kind === "weapon" ? "Against " + yours + ": " : "") + r.changes.join(" · ")) + "</span>" : "") + "</div>";
   }
   function mqMode() { try { var m = JSON.parse(localStorage.getItem("mr-reader") || "{}").mode; return MQ_MODES[m] ? m : "balanced"; } catch (e) { return "balanced"; } }
   function setMqMode(mode) { try { var o = JSON.parse(localStorage.getItem("mr-reader") || "{}"); o.mode = mode; localStorage.setItem("mr-reader", JSON.stringify(o)); } catch (e) {} }
@@ -3429,7 +3517,7 @@ function reporter() {
     missions.forEach(function (m) {
       var it = m.item ? mqItemInfo(m.item) : null;
       h += "<tr class='" + (m === r.bs ? "best" : "") + (it && it.rare ? " rare" : "") + "'" + (it ? " style='--c:" + it.color + "'" : "") + "><td><span class='nm'>" + esc(m.name) + "</span>"
-        + (it ? mqBadge(it) + "<div class='mqitem'>" + (it.img ? "<img src='" + esc(it.img) + "' alt=''>" : "") + "<span>" + esc(it.name) + "</span></div>" : "")
+        + (it ? mqBadge(it) + "<div class='mqitem'>" + (it.img ? "<img src='" + esc(it.img) + "' alt=''>" : "") + "<span>" + esc(it.name) + "</span></div>" + itemRateHtml(m.item) : "")
         + "</td><td" + (energyNow != null && m.energy > energyNow ? " style='color:#e8c46a' title='Enough energy in " + leftText(energyReadyAt(energyNow, m.energy) - Date.now()) + "'" : "") + ">" + m.energy + "</td><td class='" + (m === r.bx ? "x" : "") + "'>" + fmt(m.xpr) + "</td><td class='" + (m === r.bc ? "c" : "") + "'>" + fmt(m.cr) + "</td><td class='sc'>" + Math.round(m.score) + "</td></tr>";
     });
     return h + "</tbody></table>" + (onBar ? "" : "<div class='mqnote'>From your last visit. " + link + " for the current missions.</div>");
@@ -3487,21 +3575,26 @@ function reporter() {
   // What you deal to each class: the game's own damage code with the dice fixed, so weapon, gear, ammo, crew and food all count.
   // The target is a stand-in at your level with no toughness or armor. Thrown items only count in a fight, so they aren't in here.
   var DMG_CLASSES = [["tactician", 10], ["rogue", 25], ["bully", 50]], dmgLoading = false, dmgError = ""; // the class's damage reduction, in %
+  // One attack from fighter att on fighter def, with the game's damage code and the dice fixed: lowest and highest roll, with and
+  // without a crit. The dice come in this order: does it hit, do they dodge, is it a crit.
+  function hitDice(kit, att, def) {
+    var odds, hit = function (crit, high) {
+      odds = [];
+      var r = kit.damage({ attacker: att, defender: def, using: att.weapon, rnd: { prob: function (p) { odds.push(p); return odds.length === 1 || odds.length === 3 && crit; }, int: function (a, b) { return high ? b : a; } } });
+      if (r.isMiss || r.isDodged || r.isCrit !== crit) { throw new Error("the game's damage code wasn't recognised (the game may have changed)"); }
+      return r.damage;
+    };
+    var d = { lo: hit(false, false), hi: hit(false, true), critLo: hit(true, false), critHi: hit(true, true) };
+    d.hit = odds[0]; d.dodge = odds[1]; d.crit = odds[2];
+    // A landed shot can fire a second one for 10–20% of its damage.
+    d.avg = d.hit * (1 - d.dodge) * ((1 - d.crit) * (d.lo + d.hi) / 2 + d.crit * (d.critLo + d.critHi) / 2) * (1 + (kit.stats(att).doubleShotChanceBuffPerc || 0) * 0.15);
+    return d;
+  }
   function damageRows(kit, me) {
     var at = new Date(), mine = kit.fighter(me, at), st = kit.stats(mine), rows = DMG_CLASSES.map(function (c) {
-      var foe = kit.fighter({ id: 0, login: "", spec: c[0], xp: me.xp, attack: 0, endurance: 1, luck: 0, toughness: 0, combat: [], equipment: {}, food: [], gang: [] }, at), odds;
-      // The dice come in this order: does it hit, do they dodge, is it a crit.
-      var hit = function (crit, high) {
-        odds = [];
-        var r = kit.damage({ attacker: mine, defender: foe, using: mine.weapon, rnd: { prob: function (p) { odds.push(p); return odds.length === 1 || odds.length === 3 && crit; }, int: function (a, b) { return high ? b : a; } } });
-        if (r.isMiss || r.isDodged || r.isCrit !== crit) { throw new Error("the game's damage code wasn't recognised (the game may have changed)"); }
-        return r.damage;
-      };
-      var lo = hit(false, false), hi = hit(false, true), critLo = hit(true, false), critHi = hit(true, true);
-      // A landed shot can fire a second one for 10–20% of its damage.
-      var avg = odds[0] * (1 - odds[1]) * ((1 - odds[2]) * (lo + hi) / 2 + odds[2] * (critLo + critHi) / 2) * (1 + (st.doubleShotChanceBuffPerc || 0) * 0.15);
+      var foe = kit.fighter({ id: 0, login: "", spec: c[0], xp: me.xp, attack: 0, endurance: 1, luck: 0, toughness: 0, combat: [], equipment: {}, food: [], gang: [] }, at), d = hitDice(kit, mine, foe);
       var vs = st[{ tactician: "damageVsTacticianPerc", rogue: "damageVsRoguePerc", bully: "damageVsBullyPerc" }[c[0]]] || 0;
-      return { spec: c[0], cut: c[1], vs: vs, lo: lo, hi: hi, critLo: critLo, critHi: critHi, hit: odds[0], dodge: odds[1], crit: odds[2], avg: Math.round(avg) };
+      return { spec: c[0], cut: c[1], vs: vs, lo: d.lo, hi: d.hi, critLo: d.critLo, critHi: d.critHi, hit: d.hit, dodge: d.dodge, crit: d.crit, avg: Math.round(d.avg) };
     });
     return { rows: rows, attack: Math.ceil(st.attack * (1 + (st.attackBuffPerc || 0))), min: mine.weapon.minDamage, max: mine.weapon.maxDamage, bonus: st.damageBuffPerc || 0, extra: st.doubleShotChanceBuffPerc || 0 };
   }
