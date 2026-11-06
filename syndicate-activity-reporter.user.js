@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.29.0
+// @version      2.29.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.29.0";
+  var VERSION = "2.29.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.29.1": [
+      "Recruiting message: Send test, to try it on any player first."
+    ],
     "2.29.0": [
       "Recruits tab: a Message button sends your recruiting message (Discord invite and the 100 activity rule) to a player through the game's mail. Edit the text with Edit message."
     ],
@@ -2376,6 +2379,18 @@ function reporter() {
     }, function (e) { alert("Couldn't message " + p.name + ": " + (e && e.message || e)); })
       .then(function () { delete msgBusy[id]; redraw(); });
   }
+  // A test of the message to any player, like a family member. It isn't remembered as a recruiting message.
+  var msgTest = { busy: false, note: "", bad: false };
+  function messageTest(name) {
+    var s = load(), bad = recruitMsgProblem(s);
+    name = String(name || "").trim();
+    if (!name || msgTest.busy) { return; }
+    if (bad) { msgTest = { busy: false, note: bad, bad: true }; redraw(); return; }
+    msgTest = { busy: true, note: "Sending to " + name + "…", bad: false }; redraw();
+    messageFn().then(function (fn) { return fn({ data: { to: name, message: recruitMsgFor(s, { name: name }) } }); }).then(function () {
+      msgTest = { busy: false, note: "Sent to " + name + ". Check it in their Messages tab.", bad: false };
+    }, function (e) { msgTest = { busy: false, note: "Couldn't send to " + name + ": " + (e && e.message || e), bad: true }; }).then(redraw);
+  }
   function recruitMsgHtml(s) {
     var text = s.recruitMsg || RMSG_DEFAULT, sample = recruitMsgFor(s, { name: "PlayerName" }), bad = recruitMsgProblem(s);
     return "<div class='setup'><b>✉️ Recruiting message</b>"
@@ -2383,6 +2398,8 @@ function reporter() {
       + "<textarea data-rmsg rows='4' maxlength='" + RMSG_MAX + "' spellcheck='true' style='width:100%;box-sizing:border-box;margin:4px 0;padding:7px 8px;border-radius:6px;border:1px solid var(--strong);background:var(--input);color:var(--fg);font:inherit;font-size:12px;resize:vertical'>" + esc(text) + "</textarea>"
       + "<div style='font-size:11.5px;color:var(--muted)'>{name} becomes the player's name, {family} the family's name and {discord} your invite link. With a 10-letter name it's " + sample.length + " of " + RMSG_MAX + " characters. Use a Discord invite that never expires.</div>"
       + (bad ? "<div class='st bad'>" + esc(bad) + "</div>" : "")
+      + "<div class='row filters'><label>Test it on <input type='text' data-rmsgto placeholder='Player name' maxlength='20' spellcheck='false' autocomplete='off' style='max-width:150px'></label><button type='button' data-rmsgtest" + (msgTest.busy ? " disabled" : "") + ">Send test</button></div>"
+      + (msgTest.note ? "<div class='st" + (msgTest.bad ? " bad" : "") + "'>" + esc(msgTest.note) + "</div>" : "")
       + "<div class='row'>" + (s.recruitMsg ? "<button type='button' data-rmsgreset>Reset text</button>" : "") + "<button type='button' data-rmsgopen>Done</button></div></div>";
   }
   function skippedNote(job) {
@@ -4580,6 +4597,7 @@ function reporter() {
     if (t.hasAttribute("data-invite")) { inviteOne(t.getAttribute("data-invite")); return; }
     if (t.hasAttribute("data-rmsgsend")) { messageOne(t.getAttribute("data-rmsgsend")); return; }
     if (t.hasAttribute("data-rmsgopen")) { rmsgOpen = !rmsgOpen; redraw(); return; }
+    if (t.hasAttribute("data-rmsgtest")) { var to = box && box.querySelector("[data-rmsgto]"); messageTest(to && to.value); return; }
     if (t.hasAttribute("data-rmsgreset")) { delete s.recruitMsg; save(s); redraw(); return; }
     if (t.hasAttribute("data-inviteall")) { inviteAll(); return; }
     if (t.hasAttribute("data-invstop")) { if (inviteJob) { inviteJob.running = false; } redraw(); return; }
