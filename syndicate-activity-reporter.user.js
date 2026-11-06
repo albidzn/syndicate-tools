@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.32.0
+// @version      2.32.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.32.0";
+  var VERSION = "2.32.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.32.1": [
+      "Leaderboard: honor moved out of the honor rank column into a new Most honor record (the most any member has reached, plus today's leader if that's someone else)."
+    ],
     "2.32.0": [
       "Leaderboard: the honor rank column also shows each member's honor (like #37 · 334k), refreshed every 30 minutes."
     ],
@@ -1402,6 +1405,14 @@ function reporter() {
       lines.push("🎖️ **Best honor rank:** **" + md(ranks[0].name) + "** #" + ranks[0].pos.toLocaleString("en-US") + " (" + (ranks[0].day === today ? "today" : shortDay(Date.parse(ranks[0].day))) + ")"
         + ranks.slice(1).map(function (b, i) { return " · " + ["🥈", "🥉"][i] + " " + md(b.name) + " #" + b.pos.toLocaleString("en-US"); }).join(""));
     }
+    var hons = Object.keys(r.honor || {}).map(function (id) { return r.honor[id]; }).sort(function (a, b) { return b.h - a.h; });
+    if (hons.length) {
+      var hb = hons[0], now = s.memHonor || {}, inFam = {}, lead = null;
+      list.forEach(function (m) { inFam[m.id] = m; if (now[m.id] > 0 && (!lead || now[m.id] > now[lead.id])) { lead = m; } });
+      var recId = Object.keys(r.honor).filter(function (id) { return r.honor[id] === hb; })[0];
+      lines.push("💎 **Most honor:** **" + md(hb.name) + "** " + hb.h.toLocaleString("en-US") + " (" + (hb.day === today ? "today" : shortDay(Date.parse(hb.day))) + ")"
+        + (lead && lead.id !== recId ? " · now: " + md(lead.name) + " " + now[lead.id].toLocaleString("en-US") : ""));
+    }
     var first = Object.keys(s.hist || {}).sort()[0];
     if (!lines.length) { return null; }
     return { name: "🏆 Records", value: (lines.join("\n") + (first ? "\n-# Counted since " + shortDay(Date.parse(first)) : "")).slice(0, 1024), inline: false };
@@ -1482,10 +1493,9 @@ function reporter() {
     }
     function rankColumn() { // best (lowest) place in the game's ranking first
       var rows = list.filter(function (m) { return m.pos > 0; }).sort(function (a, b) { return a.pos - b.pos; });
-      var hon = s.memHonor || {};
       var out = ""; // whole lines only, within Discord's 1,024 characters a field
       rows.forEach(function (m, i) {
-        var line = medal(i) + " **" + md(m.name) + "** #" + m.pos.toLocaleString("en-US") + (hon[m.id] != null ? " · " + shortHonor(hon[m.id]) : "");
+        var line = medal(i) + " **" + md(m.name) + "** #" + m.pos.toLocaleString("en-US");
         if (out.length + line.length + 1 <= 1024) { out += (out ? "\n" : "") + line; }
       });
       return out || "Nothing yet.";
@@ -1503,7 +1513,7 @@ function reporter() {
           { name: "🎖️ Honor rank", value: rankColumn(), inline: true },
           { name: "🪙 Gold donated", value: column("gold", true), inline: true }
         ].concat(recordsField(s, list) || []),
-        footer: { text: "Week = " + shortDay(ws) + " to Sunday · game days start 00:00 UTC (1 AM German time) · honor rank = place in the game's player ranking, then honor · gold = all time\nUpdates by itself while a leader has the game open." },
+        footer: { text: "Week = " + shortDay(ws) + " to Sunday · game days start 00:00 UTC (1 AM German time) · honor rank = place in the game's player ranking · gold = all time\nUpdates by itself while a leader has the game open." },
         timestamp: new Date().toISOString()
       }]
     };
@@ -1521,7 +1531,7 @@ function reporter() {
   }
   // Members' honor for the leaderboard. The family list only has each member's place in the ranking, so their honor comes
   // from the game's player search, one member at a time. Only on the PC posting the leaderboard, every 30 minutes.
-  // s.memHonor = {member id: honor}, s.memHonorAt = when the last round finished.
+  // s.memHonor = {member id: honor now}, s.memHonorAt = when the last round finished; the record is in s.records.honor.
   var HONOR_EVERY = 30 * 60 * 1000, honorRun = false;
   function refreshMemberHonor(s) {
     if (!s.boardHook || !last || honorRun || Date.now() - (s.memHonorAt || 0) < HONOR_EVERY) { return; }
@@ -1537,12 +1547,14 @@ function reporter() {
       }, Promise.resolve());
     }).then(function () {
       var n = load();
-      if (Object.keys(got).length) { n.memHonor = got; boardNext = 0; }
+      if (Object.keys(got).length) {
+        n.memHonor = got; boardNext = 0;
+        var rec = ensureRecords(n), day = dayKey(Date.now());
+        rec.honor = rec.honor || {};
+        list.forEach(function (m) { var h = got[m.id], b = rec.honor[m.id]; if (h > 0 && (!b || h > b.h)) { rec.honor[m.id] = { name: m.name, h: h, day: day }; } });
+      }
       n.memHonorAt = Date.now(); save(n);
     }, function () { var n = load(); n.memHonorAt = Date.now(); save(n); }).then(function () { honorRun = false; });
-  }
-  function shortHonor(h) {
-    return h >= 1e6 ? (h / 1e6).toFixed(h >= 1e7 ? 1 : 2).replace(/\.?0+$/, "") + "M" : h >= 1e3 ? Math.round(h / 1e3) + "k" : String(h);
   }
   function updateBoard() {
     trackRanks();
