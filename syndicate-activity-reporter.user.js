@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.29.1
+// @version      2.30.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.29.1";
+  var VERSION = "2.30.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.30.0": [
+      "Activity tab → No Discord: an ✉ Ask button for each member who isn't linked, sending a message through the game's mail (once a week per member)."
+    ],
     "2.29.1": [
       "Recruiting message: Send test, to try it on any player first."
     ],
@@ -2356,6 +2359,51 @@ function reporter() {
       });
     });
   }
+  // Asking members who aren't linked to Discord to join. Not linked can also mean they joined but aren't linked yet,
+  // so the text asks those to reply with their Discord name. s.dcAsked = {member id: {name, at}}, one ask a week.
+  var DMSG_DEFAULT = "Hi {name}! Please join our Discord, it's where {family} plans wars and shares news: {discord} If you're already in, reply with your Discord name so I can link you.";
+  var dmsgOpen = false, dcBusy = {};
+  function dcMsgFor(s, m) {
+    return (s.dcMsg || DMSG_DEFAULT).split("{name}").join(m.name).split("{family}").join(last && last.fam && last.fam.name || "our family")
+      .split("{discord}").join(s.recruitDiscord || "").replace(/[ \t]+/g, " ").trim();
+  }
+  function dcMsgProblem(s) {
+    if ((s.dcMsg || DMSG_DEFAULT).indexOf("{discord}") >= 0 && !s.recruitDiscord) { return "Add your Discord invite link first, under Edit message."; }
+    if (dcMsgFor(s, { name: "xxxxxxxxxxxxxxxxxxxx" }).length > RMSG_MAX) { return "The message is too long for the game, which takes " + RMSG_MAX + " characters. Shorten it under Edit message."; }
+    return "";
+  }
+  function dcAskedOf(s, m) { var a = s.dcAsked && s.dcAsked[m.id]; return a && Date.now() - a.at < RMSG_DAYS * DAY ? a : null; }
+  function askDiscord(id) {
+    var s = load(), m = last && members(last.fam).filter(function (x) { return String(x.id) === id; })[0], bad = dcMsgProblem(s);
+    if (!m || dcBusy[id]) { return; }
+    if (bad) { alert(bad); dmsgOpen = true; redraw(); return; }
+    dcBusy[id] = true; redraw();
+    messageFn().then(function (fn) { return fn({ data: { to: m.name, message: dcMsgFor(s, m) } }); }).then(function () {
+      var n = load(), now = Date.now();
+      n.dcAsked = n.dcAsked || {}; n.dcAsked[m.id] = { name: m.name, at: now };
+      Object.keys(n.dcAsked).forEach(function (k) { if (now - n.dcAsked[k].at > 30 * DAY) { delete n.dcAsked[k]; } });
+      save(n);
+    }, function (e) { alert("Couldn't message " + m.name + ": " + (e && e.message || e)); })
+      .then(function () { delete dcBusy[id]; redraw(); });
+  }
+  function isMe(m) { var me = duelMe(); return !!me && String(me.id) === String(m.id); }
+  function dcAskTag(s, m) {
+    var a = dcAskedOf(s, m);
+    return dcBusy[m.id] ? "<span class='idle'>sending…</span>"
+      : a ? "<span class='invd' title='Asked " + ago(a.at) + " (" + new Date(a.at).toLocaleString() + "). The button comes back after " + RMSG_DAYS + " days.'>✉ asked</span>"
+      : "<button type='button' class='inv' data-dmsgsend='" + esc(m.id) + "' title='Ask " + esc(m.name) + " to join the Discord, through the game&#39;s mail'>✉ Ask</button>";
+  }
+  function dcMsgHtml(s) {
+    var text = s.dcMsg || DMSG_DEFAULT, sample = dcMsgFor(s, { name: "PlayerName" }), bad = dcMsgProblem(s);
+    return "<div class='setup'><b>✉️ Discord message</b>"
+      + "<div class='row filters'><label>Discord invite <input type='text' data-rdisc value='" + esc(s.recruitDiscord || "") + "' placeholder='https://discord.gg/…' spellcheck='false' autocomplete='off' style='min-width:220px'></label></div>"
+      + "<textarea data-dmsg rows='4' maxlength='" + RMSG_MAX + "' spellcheck='true' style='width:100%;box-sizing:border-box;margin:4px 0;padding:7px 8px;border-radius:6px;border:1px solid var(--strong);background:var(--input);color:var(--fg);font:inherit;font-size:12px;resize:vertical'>" + esc(text) + "</textarea>"
+      + "<div style='font-size:11.5px;color:var(--muted)'>{name} becomes the member's name, {family} the family's name and {discord} your invite link (the same one as the recruiting message). With a 10-letter name it's " + sample.length + " of " + RMSG_MAX + " characters.</div>"
+      + (bad ? "<div class='st bad'>" + esc(bad) + "</div>" : "")
+      + "<div class='row filters'><label>Test it on <input type='text' data-dmsgto placeholder='Player name' maxlength='20' spellcheck='false' autocomplete='off' style='width:130px'></label><button type='button' data-dmsgtest" + (msgTest.busy ? " disabled" : "") + ">Send test</button></div>"
+      + (msgTest.note && msgTest.dc ? "<div class='st" + (msgTest.bad ? " bad" : "") + "'>" + esc(msgTest.note) + "</div>" : "")
+      + "<div class='row'>" + (s.dcMsg ? "<button type='button' data-dmsgreset>Reset text</button>" : "") + "<button type='button' data-dmsgopen>Done</button></div></div>";
+  }
   function recruitMsgFor(s, p) {
     return (s.recruitMsg || RMSG_DEFAULT).split("{name}").join(p.name).split("{family}").join(last && last.fam && last.fam.name || "Our family")
       .split("{discord}").join(s.recruitDiscord || "").replace(/[ \t]+/g, " ").trim();
@@ -2380,16 +2428,16 @@ function reporter() {
       .then(function () { delete msgBusy[id]; redraw(); });
   }
   // A test of the message to any player, like a family member. It isn't remembered as a recruiting message.
-  var msgTest = { busy: false, note: "", bad: false };
-  function messageTest(name) {
-    var s = load(), bad = recruitMsgProblem(s);
+  var msgTest = { busy: false, note: "", bad: false, dc: false };
+  function messageTest(name, dc) {
+    var s = load(), bad = dc ? dcMsgProblem(s) : recruitMsgProblem(s);
     name = String(name || "").trim();
     if (!name || msgTest.busy) { return; }
-    if (bad) { msgTest = { busy: false, note: bad, bad: true }; redraw(); return; }
-    msgTest = { busy: true, note: "Sending to " + name + "…", bad: false }; redraw();
-    messageFn().then(function (fn) { return fn({ data: { to: name, message: recruitMsgFor(s, { name: name }) } }); }).then(function () {
-      msgTest = { busy: false, note: "Sent to " + name + ". Check it in their Messages tab.", bad: false };
-    }, function (e) { msgTest = { busy: false, note: "Couldn't send to " + name + ": " + (e && e.message || e), bad: true }; }).then(redraw);
+    if (bad) { msgTest = { busy: false, note: bad, bad: true, dc: !!dc }; redraw(); return; }
+    msgTest = { busy: true, note: "Sending to " + name + "…", bad: false, dc: !!dc }; redraw();
+    messageFn().then(function (fn) { return fn({ data: { to: name, message: dc ? dcMsgFor(s, { name: name }) : recruitMsgFor(s, { name: name }) } }); }).then(function () {
+      msgTest = { busy: false, note: "Sent to " + name + ". Check it in their Messages tab.", bad: false, dc: !!dc };
+    }, function (e) { msgTest = { busy: false, note: "Couldn't send to " + name + ": " + (e && e.message || e), bad: true, dc: !!dc }; }).then(redraw);
   }
   function recruitMsgHtml(s) {
     var text = s.recruitMsg || RMSG_DEFAULT, sample = recruitMsgFor(s, { name: "PlayerName" }), bad = recruitMsgProblem(s);
@@ -2399,7 +2447,7 @@ function reporter() {
       + "<div style='font-size:11.5px;color:var(--muted)'>{name} becomes the player's name, {family} the family's name and {discord} your invite link. With a 10-letter name it's " + sample.length + " of " + RMSG_MAX + " characters. Use a Discord invite that never expires.</div>"
       + (bad ? "<div class='st bad'>" + esc(bad) + "</div>" : "")
       + "<div class='row filters'><label>Test it on <input type='text' data-rmsgto placeholder='Player name' maxlength='20' spellcheck='false' autocomplete='off' style='max-width:150px'></label><button type='button' data-rmsgtest" + (msgTest.busy ? " disabled" : "") + ">Send test</button></div>"
-      + (msgTest.note ? "<div class='st" + (msgTest.bad ? " bad" : "") + "'>" + esc(msgTest.note) + "</div>" : "")
+      + (msgTest.note && !msgTest.dc ? "<div class='st" + (msgTest.bad ? " bad" : "") + "'>" + esc(msgTest.note) + "</div>" : "")
       + "<div class='row'>" + (s.recruitMsg ? "<button type='button' data-rmsgreset>Reset text</button>" : "") + "<button type='button' data-rmsgopen>Done</button></div></div>";
   }
   function skippedNote(job) {
@@ -3190,6 +3238,7 @@ function reporter() {
     h = until ? "<button type='button' class='tag away' data-away='" + esc(m.id) + "' title='Away until " + shortDay(until) + " (game days). No idle alerts, evening or war sign-up pings until then. Click to change.'>🏖️ " + shortDay(until).replace(/^\w+ /, "") + "</button>"
       : "<button type='button' class='awaybtn' data-away='" + esc(m.id) + "' title='Mark as away (vacation)'>🏖️</button>" + (a ? "<span class='tag " + a[0] + "' title='" + a[2] + "'>" + a[1] + "</span>" : "");
     h += warIcons(su, m);
+    if (memberFilter === "d" && s.links && !s.links[m.id] && !isMe(m)) { h += dcAskTag(s, m); }
     // Only where members are linked at all (the PC with the Discord settings); elsewhere every icon would look unlinked.
     // The icon goes last, so the icons line up in one column.
     if (s.links && Object.keys(s.links).length) {
@@ -4201,6 +4250,10 @@ function reporter() {
       var flags = {};
       list.forEach(function (m) { flags[m.id] = memberFlags(s, m, su); });
       html += filterHtml(s, list, flags, su);
+      if (memberFilter === "d" && s.links && Object.keys(s.links).length) {
+        html += "<div class='row filters' style='align-items:center'><span style='font-size:12px;color:var(--muted);flex:1'>Ask them to join the Discord through the game's mail, one click per member, once a week.</span>"
+          + "<button type='button' data-dmsgopen>" + (dmsgOpen ? "Close message" : "Edit message") + "</button></div>" + (dmsgOpen ? dcMsgHtml(s) : "");
+      }
       var key = sortBy === "levels" ? function (m) { return m.levels || 0; } : function (m) { return m[sortBy]; };
       list.sort(function (a, b) { return key(b) - key(a) || b.today - a.today || b.level - a.level; });
       var th = function (k, label, tip) { return "<th" + (k === sortBy ? " class='on'" : "") + (tip ? " title='" + tip + "'" : "") + ">" + label + "</th>"; };
@@ -4504,6 +4557,7 @@ function reporter() {
     if (t && t.hasAttribute && t.hasAttribute("data-elcap")) { var sl = load(); sl.elCap = Math.max(0, parseInt(t.value, 10) || 0); save(sl); t.blur(); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-ra")) { var s0 = load(); s0.recruitAlertMin = Math.max(0, parseInt(t.value, 10) || 0); save(s0); t.blur(); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-rmsg")) { var sm = load(), txt = t.value.trim(); if (txt && txt !== RMSG_DEFAULT) { sm.recruitMsg = txt; } else { delete sm.recruitMsg; } save(sm); t.blur(); redraw(); return; }
+    if (t && t.hasAttribute && t.hasAttribute("data-dmsg")) { var sq = load(), dt = t.value.trim(); if (dt && dt !== DMSG_DEFAULT) { sq.dcMsg = dt; } else { delete sq.dcMsg; } save(sq); t.blur(); redraw(); return; }
     if (t && t.hasAttribute && t.hasAttribute("data-rdisc")) { var sd = load(), link = t.value.trim(); if (link) { sd.recruitDiscord = link; } else { delete sd.recruitDiscord; } save(sd); t.blur(); redraw(); return; }
     if (!k) { return; }
     var s = load(), rf = recruitFilter(s);
@@ -4597,8 +4651,12 @@ function reporter() {
     if (t.hasAttribute("data-invite")) { inviteOne(t.getAttribute("data-invite")); return; }
     if (t.hasAttribute("data-rmsgsend")) { messageOne(t.getAttribute("data-rmsgsend")); return; }
     if (t.hasAttribute("data-rmsgopen")) { rmsgOpen = !rmsgOpen; redraw(); return; }
-    if (t.hasAttribute("data-rmsgtest")) { var to = box && box.querySelector("[data-rmsgto]"); messageTest(to && to.value); return; }
+    if (t.hasAttribute("data-rmsgtest")) { var to = box && box.querySelector("[data-rmsgto]"); messageTest(to && to.value, false); return; }
     if (t.hasAttribute("data-rmsgreset")) { delete s.recruitMsg; save(s); redraw(); return; }
+    if (t.hasAttribute("data-dmsgsend")) { askDiscord(t.getAttribute("data-dmsgsend")); return; }
+    if (t.hasAttribute("data-dmsgopen")) { dmsgOpen = !dmsgOpen; redraw(); return; }
+    if (t.hasAttribute("data-dmsgtest")) { var dto = box && box.querySelector("[data-dmsgto]"); messageTest(dto && dto.value, true); return; }
+    if (t.hasAttribute("data-dmsgreset")) { delete s.dcMsg; save(s); redraw(); return; }
     if (t.hasAttribute("data-inviteall")) { inviteAll(); return; }
     if (t.hasAttribute("data-invstop")) { if (inviteJob) { inviteJob.running = false; } redraw(); return; }
     if (t.hasAttribute("data-copyall")) { copyText(recruitList(s).map(function (p) { return p.name; }).join("\n")); alert("Copied " + recruitList(s).length + " names, one per line."); return; }
