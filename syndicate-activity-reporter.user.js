@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.33.1
+// @version      2.33.2
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.33.1";
+  var VERSION = "2.33.2";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.33.2": [
+      "War attendance: in a defence, members who didn't register no longer count as having fought. The game still puts them in at half health, so the attendance message lists them under \"Didn't register\". Recent defences are recounted, so war counts in the member list, the advice and the rankings catch up."
+    ],
     "2.33.1": [
       "War debrief: fighters' levels show correctly again (the average level for our side, and the level of their best fighter)."
     ],
@@ -2851,11 +2854,15 @@ function reporter() {
     return lv || (xp != null ? levelOfXp(xp) : 0);
   }
   // Per-fighter numbers from a replay, each side sorted best first (duels won, then damage).
+  // In a defence the game also puts in members who didn't register, at half health (the replay's initialHealth =
+  // {fighter id: share of full health}, missing = full): those are marked auto, they didn't sign up.
   function fighterStats(fam, w, rp) {
-    var attack = w.attackerId === fam.id, st = {};
+    var attack = w.attackerId === fam.id, st = {}, hp = rp.initialHealth || {};
     var ours = (attack ? rp.attackers : rp.defenders) || [], theirs = (attack ? rp.defenders : rp.attackers) || [];
     ours.concat(theirs).forEach(function (f, i) {
-      st[fighterId(f)] = { f: f, ours: i < ours.length, name: fighterName(f), level: fighterLevel(f), wins: 0, dmg: 0, best: 0, crits: 0, died: false };
+      var id = fighterId(f), h = +hp[id];
+      st[id] = { f: f, ours: i < ours.length, name: fighterName(f), level: fighterLevel(f), wins: 0, dmg: 0, best: 0, crits: 0, died: false,
+        auto: !attack && i < ours.length && hp[id] != null && h < 1 };
     });
     (rp.events || []).forEach(function (e) {
       if (e.type === "attack" || e.type === "consumable") {
@@ -2888,18 +2895,19 @@ function reporter() {
   // ===== War attendance =====
   // The game lets a member fight only if they had been in the family for 12 hours when the war was declared (it says
   // "You needed 12 hours of membership when this war was declared"); a war is declared 10 hours before its battle.
-  // So attendance counts, per member, only the wars they could have joined. s.warFought = {war id: {at: declared, ids: [member ids who fought]}};
+  // So attendance counts, per member, only the wars they could have joined. s.warFought = {war id: {at: declared, ids: [member ids who fought],
+  // auto: [member ids the game put in without registering (defence only), not counted as fought], hp: true once that was checked}};
   // the join time comes from the game's member data (joinedAt), or else from when the script first saw them join (s.joinSeen).
   var WAR_WAIT_HOURS = 12, WAR_PREP_HOURS = 10;
   function declaredAt(w) { return +new Date(w.declaredAt || w.createdAt || 0) || startOf(w) - WAR_PREP_HOURS * HOUR; }
   function joinTime(s, m) { return m.joinedAt || s.joinSeen && s.joinSeen[m.id] || 0; }
   function couldFight(s, m, at) { var j = joinTime(s, m); return !j || j + WAR_WAIT_HOURS * HOUR <= at; } // unknown join time: counted
   function recordFought(s, fam, w, us) {
-    var ids = [];
-    us.forEach(function (x) { var m = fighterMember(fam, x); if (m && ids.indexOf(m.id) < 0) { ids.push(m.id); } });
-    if (!ids.length) { return false; } // fighters couldn't be matched to members
+    var ids = [], auto = [];
+    us.forEach(function (x) { var m = fighterMember(fam, x), to = x.auto ? auto : ids; if (m && to.indexOf(m.id) < 0) { to.push(m.id); } });
+    if (!ids.length && !auto.length) { return false; } // fighters couldn't be matched to members
     s.warFought = s.warFought || {};
-    s.warFought[w.id] = { at: declaredAt(w), ids: ids };
+    s.warFought[w.id] = { at: declaredAt(w), ids: ids, auto: auto, hp: true };
     return true;
   }
   // {member id: {fought, wars}} over the recorded wars each member could have joined. Before any war is recorded per war,
@@ -2917,15 +2925,17 @@ function reporter() {
     return o;
   }
   // One-time: the wars in the game's list, recorded per war from their replays, so past attendance follows the 12-hour rule too.
+  // Run again once by 2.33.2 (s.attendHp) for the defences recorded before members put in without registering were told apart.
   var attendFilling = false, attendNext = 0;
   function backfillAttendance() {
     var s0 = load();
-    if (attendFilling || !last || !last.fam.private || !s0.webhook || s0.attendFilled || Date.now() < attendNext) { return; }
+    if (attendFilling || !last || !last.fam.private || !s0.webhook || s0.attendFilled && s0.attendHp || Date.now() < attendNext) { return; }
     attendFilling = true; attendNext = Date.now() + 5 * 60000; // a failed try waits 5 minutes (redraw() runs this again at once)
     var fam = last.fam;
     familyQueries().then(function (q) {
       if (!q.war) { return false; }
-      var todo = warsOf(fam).filter(function (w) { return w.status === "finished" && !(s0.warFought && s0.warFought[w.id]); }), ok = true;
+      var rec = function (w) { return s0.warFought && s0.warFought[w.id]; };
+      var todo = warsOf(fam).filter(function (w) { return w.status === "finished" && (!rec(w) || !rec(w).hp && w.defenderId === fam.id); }), ok = true;
       return todo.reduce(function (chain, w, i) {
         return chain.then(function () { return i ? wait(SCAN_GAP) : null; }).then(function () { return warDetail(w.id); }).then(function (det) {
           if (!det || !det.replay || !det.replay.events || !det.replay.events.length) { return; }
@@ -2933,7 +2943,7 @@ function reporter() {
         }).catch(function () { ok = false; });
       }, Promise.resolve()).then(function () { return ok; });
     }).then(function (ok) {
-      if (ok) { var s3 = load(); s3.attendFilled = true; save(s3); }
+      if (ok) { var s3 = load(); s3.attendFilled = true; s3.attendHp = true; save(s3); }
     }).catch(function () {}).then(function () { attendFilling = false; redraw(); });
   }
 
@@ -3114,13 +3124,17 @@ function reporter() {
       content: text.slice(0, 2000), embeds: [{ description: desc.slice(0, 4000), color: won ? 0x00cc00 : 0xcc0000 }] };
     // Attendance: which current members fought, out of those who were allowed to (12 hours in the family when it was declared).
     if (!recordFought(s, fam, w, us)) { return { war: warMsg, lead: null }; } // fighters couldn't be matched to members
-    var ids = s.warFought[w.id].ids, at = s.warFought[w.id].at, list = members(fam), att = attendance(s, list);
+    var ids = s.warFought[w.id].ids, auto = s.warFought[w.id].auto || [], at = s.warFought[w.id].at, list = members(fam), att = attendance(s, list);
     var allowed = list.filter(function (m) { return couldFight(s, m, at); }), tooNew = list.filter(function (m) { return !couldFight(s, m, at); });
     var missing = allowed.filter(function (m) { return ids.indexOf(m.id) < 0; });
+    var unreg = missing.filter(function (m) { return auto.indexOf(m.id) >= 0; }), absent = missing.filter(function (m) { return auto.indexOf(m.id) < 0; });
     var foughtN = allowed.length - missing.length;
-    var leadMsg = shout("🪖 **War attendance · " + (won ? "won" : "lost") + " vs " + foe + "**: " + foughtN + " of " + allowed.length + " fought"
+    var names = function (a) { return a.map(function (m) { var x = att[m.id] || { fought: 0, wars: 0 }; return "**" + md(m.name) + "** (" + x.fought + "/" + x.wars + " wars)"; }).join(", "); };
+    var leadMsg = shout("🪖 **War attendance · " + (won ? "won" : "lost") + " vs " + foe + "**: " + foughtN + " of " + allowed.length + (attack ? " fought" : " registered")
       + (tooNew.length ? " (" + tooNew.length + " too new to fight)" : "") + "."
-      + (missing.length ? "\nDidn't fight: " + missing.map(function (m) { var a = att[m.id] || { fought: 0, wars: 0 }; return "**" + md(m.name) + "** (" + a.fought + "/" + a.wars + " wars)"; }).join(", ") : "\nEveryone who could fight did! 💪")
+      + (unreg.length ? "\nDidn't register (the game put them in at half health): " + names(unreg) : "")
+      + (absent.length ? "\nDidn't fight: " + names(absent) : "")
+      + (missing.length ? "" : attack ? "\nEveryone who could fight did! 💪" : "\nEveryone who could registered! 💪")
       + (tooNew.length ? "\n-# Too new: " + tooNew.map(function (m) { return md(m.name); }).join(", ") + ". Members need " + WAR_WAIT_HOURS + " hours in the family when a war is declared; this war doesn't count for them." : ""));
     return { war: warMsg, lead: leadMsg };
   }
