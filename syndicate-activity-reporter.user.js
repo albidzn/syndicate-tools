@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.33.0
+// @version      2.33.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.33.0";
+  var VERSION = "2.33.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.33.1": [
+      "War debrief: fighters' levels show correctly again (the average level for our side, and the level of their best fighter)."
+    ],
     "2.33.0": [
       "Mission picker: when a mission gives an item, it's checked against your stats and says whether it's worth it (how much stronger it makes you, or that what you have is better), with the stats it adds or loses."
     ],
@@ -2842,7 +2845,11 @@ function reporter() {
   // s.wars[id].debrief marks it done; who fought is kept per war in s.warFought (see War attendance below).
   function fighterId(f) { return String(f.id != null ? f.id : f.character && f.character.id); }
   function fighterName(f) { return f.name || f.login || f.character && (f.character.name || f.character.login) || "#" + fighterId(f); }
-  function fighterLevel(f) { return +(f.level || f.character && f.character.level) || 0; }
+  // Replay fighters have no level, only XP (the game works levels out from XP), so the level comes from that.
+  function fighterLevel(f) {
+    var c = f.character || {}, lv = +(f.level || c.level) || 0, xp = typeof f.xp === "number" ? f.xp : typeof c.xp === "number" ? c.xp : null;
+    return lv || (xp != null ? levelOfXp(xp) : 0);
+  }
   // Per-fighter numbers from a replay, each side sorted best first (duels won, then damage).
   function fighterStats(fam, w, rp) {
     var attack = w.attackerId === fam.id, st = {};
@@ -3086,6 +3093,8 @@ function reporter() {
   function buildDebrief(s, fam, w, det) {
     var rp = det.replay, attack = w.attackerId === fam.id, users = [], fs = fighterStats(fam, w, rp), us = fs.us, them = fs.them;
     var member = function (x) { return fighterMember(fam, x); };
+    us.forEach(function (x) { if (!x.level) { var m = member(x); x.level = m && +m.level || 0; } }); // no XP in the replay: the family list's level
+    var known = function (a) { return a.filter(function (x) { return x.level > 0; }); };
     var label = function (x) { var m = member(x); return m ? who(s, m, users) : "**" + md(x.name) + "**"; };
     var line = function (x, i) {
       // Fighters further back in the queue may never get their turn before the battle is decided.
@@ -3098,8 +3107,8 @@ function reporter() {
     countMvp(s, fam, w, mvp); // for the leaderboard's "most MVPs" (the caller saves s)
     var text = "📜 **War debrief · " + (won ? "🏆 Victory" : "💀 Defeat") + " " + (attack ? "attacking " : "defending against ") + foe + "**\n"
       + (mvp ? "🏅 **MVP: " + label(mvp) + "** — " + mvp.wins + " duel" + (mvp.wins === 1 ? "" : "s") + " won, " + mvp.dmg.toLocaleString("en-US") + " damage!" : "");
-    var desc = "**Our fighters** (" + us.length + ", avg lv " + avg(us) + ")\n" + (us.length ? us.map(line).join("\n") : "Nobody fought for us.")
-      + (best ? "\n\n😈 **Their best:** " + md(best.name) + " (lv " + best.level + ") — " + best.wins + " duel" + (best.wins === 1 ? "" : "s") + " won · " + best.dmg.toLocaleString("en-US") + " dmg" : "")
+    var desc = "**Our fighters** (" + us.length + (known(us).length ? ", avg lv " + avg(known(us)) : "") + ")\n" + (us.length ? us.map(line).join("\n") : "Nobody fought for us.")
+      + (best ? "\n\n😈 **Their best:** " + md(best.name) + (best.level ? " (lv " + best.level + ")" : "") + " — " + best.wins + " duel" + (best.wins === 1 ? "" : "s") + " won · " + best.dmg.toLocaleString("en-US") + " dmg" : "")
       + "\n\n-# Fighters: us " + us.length + " vs them " + them.length + " · duels fight one at a time, the winner stays in";
     var warMsg = { username: "Syndicate Wars", allowed_mentions: { parse: [], users: users.slice(0, 1) },
       content: text.slice(0, 2000), embeds: [{ description: desc.slice(0, 4000), color: won ? 0x00cc00 : 0xcc0000 }] };
