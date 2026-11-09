@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.35.0
+// @version      2.35.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.35.0";
+  var VERSION = "2.35.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.35.1": [
+      "Recruits tab opens again (2.35.0 broke it)."
+    ],
     "2.35.0": [
       "Safety first: the game has warned that any automation is banned. Everything that acted in the game by itself is gone: Auto-join wars, Auto-attack (Attack when free / Attack next), Auto-renew boosts and Invite all. If any of them was switched on, it's off now.",
       "Still there, one click each: Attack now in the war planner, Buy for an ended boost, and the Invite button next to each recruit. Sign up for wars with the game's own Register button."
@@ -2532,10 +2535,10 @@ function reporter() {
       h += "<table><thead><tr><th>Rank</th><th>Name</th><th>Class</th><th>Level</th><th>Honor</th><th title='Levels and honor gained since the scans first saw them searching'>Growth</th><th></th><th></th><th></th></tr></thead><tbody>"
         + (list.length ? list.map(function (p) {
           var g = growth(s, p), gt = !g || g.days < 0.5 ? "<span class='idle'>new</span>" : (g.lv > 0 ? "+" + g.lv + " lv " : "") + (g.honor > 0 ? "+" + g.honor + " hon " : "") + (g.lv <= 0 && g.honor <= 0 ? "– " : "") + "<span class='idle'>" + Math.round(g.days) + "d</span>";
-          var inv = inviteOf(s, p, news), busyNow = inviteBusy[p.id] || job && job.running && job.current === p.name;
+          var inv = inviteOf(s, p, news), busyNow = inviteBusy[p.id];
           var it = busyNow ? "<span class='idle'>sending…</span>"
             : inv ? "<span class='invd' title='Invited " + (inv.by ? "by " + esc(inv.by) + " " : "") + new Date(inv.at).toLocaleString() + ". Invitations last " + INVITE_DAYS + " days.'>✉ invited " + ago(inv.at) + "</span>"
-            : "<button type='button' class='inv' data-invite='" + esc(p.id) + "'" + (job && job.running ? " disabled" : "") + ">Invite</button>";
+            : "<button type='button' class='inv' data-invite='" + esc(p.id) + "'>Invite</button>";
           var msgd = messagedOf(s, p), mt = msgBusy[p.id] ? "<span class='idle'>sending…</span>"
             : msgd ? "<span class='invd' title='Messaged " + new Date(msgd.at).toLocaleString() + ". The button comes back after " + RMSG_DAYS + " days.'>✉ messaged " + ago(msgd.at) + "</span>"
             : "<button type='button' class='inv' data-rmsgsend='" + esc(p.id) + "' title='Sends your recruiting message to " + esc(p.name) + " through the game&#39;s mail'>Message</button>";
