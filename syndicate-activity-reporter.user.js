@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.34.2
+// @version      2.35.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,13 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.34.2";
+  var VERSION = "2.35.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.35.0": [
+      "Safety first: the game has warned that any automation is banned. Everything that acted in the game by itself is gone: Auto-join wars, Auto-attack (Attack when free / Attack next), Auto-renew boosts and Invite all. If any of them was switched on, it's off now.",
+      "Still there, one click each: Attack now in the war planner, Buy for an ended boost, and the Invite button next to each recruit. Sign up for wars with the game's own Register button."
+    ],
     "2.34.2": [
       "Mission picker: gold missions show up now. The game doesn't send the gold with the missions, so the picker works it out the way the game does, and only shows it when that matches the game's missions."
     ],
@@ -255,6 +259,13 @@ function reporter() {
   // { webhook, sentDay, sentAt, base: {id: {name, level, gold}}, prev, min, lock }
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { return {}; } }
   function save(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
+  // 2.35.0: the game bans automation, so the features that acted in the game by themselves were removed, and their saved switches with them.
+  (function () {
+    var s = load(), gone = false;
+    ["autoBoost", "autoTry", "autoAttack", "joined", "joinTry"].forEach(function (k) { if (k in s) { delete s[k]; gone = true; } });
+    if (s.fx && "autojoin" in s.fx) { delete s.fx.autojoin; gone = true; }
+    if (gone) { save(s); }
+  })();
 
   // Game volume, per PC (s.volume, 0–100). The game plays every sound through Web Audio and connects each one to the
   // context's speakers, so those connections are sent through one gain node per context instead. Works on every game page.
@@ -1971,7 +1982,7 @@ function reporter() {
   var KEEP = 3 * 60 * 1000;
   function keepFresh() {
     var s = load(), q = last && last.query;
-    if (!(s.warHook || s.boardHook || s.lvHook || box || fxOn(s, "autojoin")) || !q || q.state.fetchStatus === "fetching" || Date.now() - q.state.dataUpdatedAt < KEEP) { return; }
+    if (!(s.warHook || s.boardHook || s.lvHook || box) || !q || q.state.fetchStatus === "fetching" || Date.now() - q.state.dataUpdatedAt < KEEP) { return; }
     if (typeof q.fetch === "function" && q.options && q.options.queryFn) { q.fetch().catch(function () {}); }
   }
   // The docked panel can open on any game page, where the game hasn't loaded the family yet: load it through the game's own
@@ -2075,10 +2086,7 @@ function reporter() {
         if (o.fam && (!o.fam.private || !Array.isArray(o.fam.private.wars))) { throw new Error("the family's war list is missing"); }
       }); }],
       ["Donation thank-yous", function () { return family().then(function (o) { if (!o.q.account) { throw new Error("the treasury request wasn't found"); } }); }],
-      ["Invites, boosts and auto-attack", function () { return familyCommand(); }],
-      ["War auto-join", function () { return family().then(function () {
-        return Promise.all(famUrls.map(function (u) { return fetch(u).then(function (r) { return r.text(); }); }));
-      }).then(function (files) { if (!/participate/.test(files.join(""))) { throw new Error("the game's Register request wasn't found"); } }); }],
+      ["Invites, boosts and Attack now", function () { return familyCommand(); }],
       ["Recruit and duel scans", function () { return playerRanking(); }],
       ["Duel win chances", function () { return duelTools().then(function (kit) { var me = duelMe(); if (me) { fights(kit, me); } }); }],
       ["Your damage", function () { return duelTools().then(function (kit) {
@@ -2289,8 +2297,8 @@ function reporter() {
   // that page's file (an _id-*.js file named in the game's index file that sends the "invite" command) and calls the
   // function it imports from the family module. s.invited = {player id: {name, at}} remembers invites sent from here;
   // invites sent by anyone else show up in the family news ("X invited Y to the family."). Invites last 7 days in the game.
-  var INVITE_DAYS = 7, INVITE_GAP = 2000;
-  var inviteFn = null, inviteJob = null, inviteBusy = {};
+  var INVITE_DAYS = 7;
+  var inviteFn = null, inviteBusy = {};
   function familyCommand() {
     if (inviteFn) { return Promise.resolve(inviteFn); }
     var res = performance.getEntriesByType("resource").map(function (e) { return e.name; });
@@ -2327,7 +2335,7 @@ function reporter() {
       if (/invit/i.test(msg) && /already|pending/i.test(msg)) { markInvited(p); return; } // invited before, by us or someone else
       var err = new Error(msg);
       // The list is from the last scan: since then the player may have joined a family or stopped searching.
-      // Those are dropped from the list and skipped; refusals about our own family (full, rank) stop Invite all.
+      // Those are dropped from the list.
       if (/belongs to a family|already (in|has|joined) a family|already a member|not looking|no longer|not found|(doesn't|does not) exist/i.test(msg)) { dropRecruit(p); err.skip = true; }
       throw err;
     });
@@ -2372,34 +2380,10 @@ function reporter() {
   }
   function inviteOne(id) {
     var p = recruitList(load()).filter(function (x) { return String(x.id) === id; })[0];
-    if (!p || inviteBusy[id] || inviteJob && inviteJob.running) { return; }
+    if (!p || inviteBusy[id]) { return; }
     inviteBusy[id] = true; redraw();
     sendInvite(p).then(refreshFamily, function (e) { alert("Couldn't invite " + p.name + ": " + (e && e.message || e) + (e && e.skip ? "\n\nThey're no longer searching, so they've been removed from the list." : "")); })
       .then(function () { delete inviteBusy[id]; redraw(); });
-  }
-  // Invites everyone in the list as it's filtered now who has no open invite, one every 2 seconds. Players who have joined a
-  // family since the scan are skipped; any other refusal stops it.
-  function inviteAll() {
-    if (inviteJob && inviteJob.running) { return; }
-    var s = load(), news = newsInvites(), todo = recruitList(s).filter(function (p) { return !inviteOf(s, p, news); });
-    if (!todo.length) { alert("Everyone in this list already has an open invitation."); return; }
-    if (!confirm("Send a family invitation to " + todo.length + " player" + (todo.length === 1 ? "" : "s") + " (the list as filtered now)?\n\nOne goes out every " + INVITE_GAP / 1000 + " seconds. You can stop any time.")) { return; }
-    var job = inviteJob = { running: true, done: 0, skipped: 0, total: todo.length, current: "" };
-    redraw();
-    todo.reduce(function (pr, p, i) {
-      return pr.then(function () {
-        if (!job.running) { return; }
-        return wait(i ? INVITE_GAP : 0).then(function () {
-          if (!job.running) { return; }
-          job.current = p.name; redraw();
-          return sendInvite(p).then(function () { job.done++; }, function (e) { if (e && e.skip) { job.skipped++; return; } throw e; });
-        });
-      });
-    }, Promise.resolve()).then(function () {
-      job.msg = (job.running ? "Done: " : "Stopped: ") + job.done + " of " + job.total + " invitations sent." + skippedNote(job);
-    }, function (e) {
-      job.error = "Stopped after " + job.done + " of " + job.total + " invitations." + skippedNote(job) + " The game said: " + (e && e.message || e);
-    }).then(function () { job.running = false; job.current = ""; refreshFamily(); redraw(); });
   }
   // ----- A message to a searching player, through the game's own mail ("Write" tab: {to: name, message}, at most 450 characters).
   // Its request is rebuilt like the mailbox's. The text is the leader's own (s.recruitMsg, s.recruitDiscord), kept on this PC only.
@@ -2518,9 +2502,6 @@ function reporter() {
       + (msgTest.note && !msgTest.dc ? "<div class='st" + (msgTest.bad ? " bad" : "") + "'>" + esc(msgTest.note) + "</div>" : "")
       + "<div class='row'>" + (s.recruitMsg ? "<button type='button' data-rmsgreset>Reset text</button>" : "") + "<button type='button' data-rmsgopen>Done</button></div></div>";
   }
-  function skippedNote(job) {
-    return job.skipped ? " " + job.skipped + " skipped: no longer searching (removed from the list)." : "";
-  }
   function recruitHtml(s) {
     var r = s.recruits, f = recruitFilter(s), list = recruitList(s), h = "";
     h += "<div class='st'>Players in the ranking marked <b>looking for a family</b>. Click a name to copy it, or send them your recruiting message.</div>";
@@ -2539,13 +2520,8 @@ function reporter() {
     }).join("") + "</span></div>"
       + (s.webhook ? "<div class='row filters'><label>🔔 Alert the leadership chat about new searching players from level <input type='number' min='0' data-ra value='" + (s.recruitAlertMin || 0) + "'></label>"
         + "<button type='button' data-ratoggle>" + (s.recruitAlert === false ? "Alerts off" : "Alerts on") + "</button></div>" : "");
-    var job = inviteJob, open = list.filter(function (p) { return !inviteOf(s, p, news); }).length;
-    if (job && job.running) { h += "<div class='st wait'>Sending invitations… " + job.done + " of " + job.total + (job.current ? " · " + esc(job.current) : "") + " <button type='button' data-invstop>Stop</button></div>"; }
-    else if (job && job.error) { h += "<div class='st bad'>" + esc(job.error) + "</div>"; }
-    else if (job && job.msg) { h += "<div class='st'>" + esc(job.msg) + "</div>"; }
     // Buttons and the scan summary above the list, so nothing needs scrolling down.
     h += "<div class='row'><button type='button' class='go' data-rscan" + (recruiting && recruiting.running ? " disabled" : "") + ">" + (r ? "Scan again" : "Find recruits") + "</button>"
-      + (open ? "<button type='button' data-inviteall" + (job && job.running ? " disabled" : "") + ">Invite all (" + open + ")</button>" : "")
       + (list.length ? "<button type='button' data-copyall>Copy all names</button>" : "")
       + "<button type='button' data-rmsgopen>" + (rmsgOpen ? "Close message" : "Edit message") + "</button>"
       + (list.length && s.webhook ? "<button type='button' data-postrecruits>Post to leadership chat</button>" : "") + "</div>";
@@ -2728,7 +2704,7 @@ function reporter() {
   function checkBoosts() {
     var s = load(), p = last && last.fam.private;
     if (!p || !canPost("boost") || !canPost("boostfam")) { return; }
-    var now = Date.now(), lead = [], fam = [], changed = false, auto = autoOn(s, p), reminded = false;
+    var now = Date.now(), lead = [], fam = [], changed = false, reminded = false;
     s.boosts = s.boosts || {};
     Object.keys(BOOSTS).forEach(function (k) {
       var until = p[k + "BoostUntil"] ? new Date(p[k + "BoostUntil"]).getTime() : 0, pct = +p[k + "Boost"] || 0, b = s.boosts[k], name = BOOSTS[k];
@@ -2740,10 +2716,10 @@ function reporter() {
       }
       if (until > now) {
         if (b.pct !== pct) { b.pct = pct; changed = true; }
-        var again = auto[k] ? " Auto-renew is on: it will be bought again when it ends, if the game is open on that PC." : " Buy it again on the Family tab to keep it running.";
+        var again = " Buy it again on the Family tab to keep it running.";
         if (!b.h1 && until - now <= HOUR) { b.h1 = b.d24 = true; changed = reminded = true; lead.push("⏰ The **+" + pct + "% " + name + " boost** ends <t:" + t + ":R>!" + again); }
         else if (!b.d24 && until - now <= DAY) { b.d24 = true; changed = reminded = true; lead.push("⏳ The **+" + pct + "% " + name + " boost** ends <t:" + t + ":R> (<t:" + t + ":f>)." + again); }
-      } else if (b.until && !b.ended) { b.ended = true; changed = true; lead.push("⌛ The **+" + b.pct + "% " + name + " boost** has ended." + (auto[k] ? " Auto-renew is buying a new one." : " Buy a new one on the Family tab.")); }
+      } else if (b.until && !b.ended) { b.ended = true; changed = true; lead.push("⌛ The **+" + b.pct + "% " + name + " boost** has ended." + " Buy a new one on the Family tab."); }
     });
     if (reminded) { var gl = renewGold(p, now); if (gl) { lead.push(gl); } }
     if (changed) { save(s); }
@@ -2761,58 +2737,9 @@ function reporter() {
       + (gold < need ? " ⚠️ **" + (need - gold).toLocaleString("en-US") + " gold missing**: time to collect donations!" : " ✅ Enough gold.");
   }
 
-  // Auto-renew (s.autoBoost = {xp, cash}, switched on per PC): a boost that has run out is bought again at +25% for 7 days
-  // with family gold, through the same command as the Family tab's buy buttons. The game lets Godfathers and Counselors buy.
-  // The family data is loaded fresh first, so a boost someone has just bought isn't bought twice.
-  // s.autoTry = {xp|cash: {until, n, at, said}}: attempts for the boost that ended at `until`. A refusal is tried 3 times,
-  // 30 minutes apart; too little family gold is checked again every 30 minutes. Each is posted to the leadership chat once.
-  var AUTO_PCT = 25, AUTO_TRIES = 3, AUTO_GAP = 30 * 60000, autoBusy = false;
-  function autoOn(s, p) {
-    var on = s.autoBoost || {}, ok = p && (!p.rank || p.rank === "godfather" || p.rank === "counselor"); // without a rank the game decides
-    return { xp: !!(ok && on.xp), cash: !!(ok && on.cash) };
-  }
+  // Boosts are bought by hand only: the Buy button on an ended boost gets +25% for 7 days.
+  var AUTO_PCT = 25;
   function boostEnd(p, k) { return p[k + "BoostUntil"] ? new Date(p[k + "BoostUntil"]).getTime() : 0; }
-  function checkAutoBoost() {
-    var s = load(), p = last && last.fam.private, auto = autoOn(s, p), now = Date.now(), tries = s.autoTry || {};
-    if (!p || autoBusy || !(auto.xp || auto.cash) || now - last.at > 5 * 60000) { return; }
-    var kind = Object.keys(BOOSTS).filter(function (k) {
-      var until = boostEnd(p, k), t = tries[k];
-      if (!auto[k] || until > now) { return false; }
-      return !t || t.until !== until || (t.gold || t.n < AUTO_TRIES) && now - t.at >= AUTO_GAP;
-    })[0];
-    if (!kind) { return; }
-    var q = last.query, famId = last.fam.id, name = BOOSTS[kind];
-    if (!q || typeof q.fetch !== "function") { return; }
-    autoBusy = true;
-    q.fetch().then(function (d) {
-      var fp = d && (d.family || d).private, until = fp ? boostEnd(fp, kind) : 0;
-      if (!fp || until > Date.now()) { return; } // someone has renewed it already
-      var s2 = load(), t = s2.autoTry && s2.autoTry[kind], same = t && t.until === until;
-      var rec = { until: until, n: (same ? t.n : 0) + 1, at: Date.now(), said: same ? t.said : "" };
-      s2.autoTry = s2.autoTry || {}; s2.autoTry[kind] = rec; save(s2);
-      var price = fp.boostPrices && fp.boostPrices.high, gold = +fp.treasury || 0;
-      function note(key, text) { // one leadership post per ended boost and reason
-        var s3 = load();
-        if (s3.autoTry[kind].said === key) { return; }
-        s3.autoTry[kind].said = key; save(s3);
-        if (s3.webhook) { postFor("autoboost", s3.webhook, shout(text)); }
-      }
-      if (!price) { note("price", "⚠️ Couldn't auto-renew the **" + name + " boost**: the game didn't show a price. Buy it on the Family tab."); return; }
-      if (gold < price) {
-        var s4 = load(); s4.autoTry[kind].gold = true; save(s4);
-        note("gold", "⚠️ Not enough family gold to auto-renew the **+" + AUTO_PCT + "% " + name + " boost**: it costs " + price.toLocaleString("en-US") + ", the treasury has " + gold.toLocaleString("en-US") + ". Checking again every 30 minutes.");
-        return;
-      }
-      return familyCommand().then(function (fn) {
-        return fn({ data: { requestId: crypto.randomUUID(), command: { action: "boost", familyId: famId, kind: kind, percent: AUTO_PCT, price: price } } });
-      }).then(function () {
-        note("bought", "🛒 Auto-renewed the **+" + AUTO_PCT + "% " + name + " boost** for 7 days: " + price.toLocaleString("en-US") + " family gold paid, " + (gold - price).toLocaleString("en-US") + " left.");
-        refreshFamily();
-      }, function (e) {
-        if (rec.n >= AUTO_TRIES) { note("fail", "⚠️ Couldn't auto-renew the **" + name + " boost** after " + AUTO_TRIES + " tries. The game said: " + (e && e.message || e) + ". Buy it on the Family tab."); }
-      });
-    }).catch(function () {}).then(function () { autoBusy = false; redraw(); });
-  }
 
   // ===== Donation shout-outs =====
   // A thank-you in the family chat for every single donation of 500 gold or more, louder for bigger ones. Read every 5 minutes
@@ -2956,105 +2883,27 @@ function reporter() {
     }).catch(function () {}).then(function () { attendFilling = false; redraw(); });
   }
 
-  // ===== Attack when free =====
-  // In the war planner, "Attack when free" on a family under attack arms an automatic war declaration, and "Attack now" on a
-  // ready one does the same at once. s.autoAttack = {id, name, freeAt, armedAt, why}. From shortly before their battle, the
-  // target's family page is loaded fresh every 15 seconds; as soon as the game says we may declare on them (its
-  // warDeclaration has no "blocked" reason), the same "declare" command as the Family tab's Attack button is sent.
-  // It gives up 30 minutes after the expected time, or if we have another attack planned by then. Only while the game is
-  // open on this PC, and only Godfathers and Counselors can declare.
-  // While we have an attack planned, one next attack can be queued (s.autoAttack.afterWar = that war's id): it goes out at the later of
-  // our battle and the target's own battle. Any family in the scan can be queued, the one we're attacking now too, since its battle is ours.
-  // If someone else attacks the target meanwhile, the expected time moves to their battle instead of running out.
-  var ATTACK_POLL = 15000, ATTACK_LEAD = 30000, ATTACK_GIVEUP = 30 * 60000, attackBusy = false, attackAt = 0, attackNote = "";
+  // ===== Attack now =====
+  // In the war planner, "Attack now" on a family that can be attacked sends the same "declare" command as the Family tab's Attack
+  // button, once, after a confirmation. Only Godfathers and Counselors can declare. Nothing is ever declared by itself.
+  var attackBusy = false, attackNote = "";
   function canDeclare(p) { return !!p && (!p.rank || p.rank === "godfather" || p.rank === "counselor"); }
-  function ourAttack() { return last ? warsOf(last.fam).filter(function (w) { return w.status === "preparing" && w.attackerId === last.fam.id; })[0] : null; }
-  function familyFresh(id) {
-    return familyOptions().then(function (fo) {
-      if (!fo || !client) { throw new Error("open the Family tab once, then try again"); }
-      return client.fetchQuery(Object.assign({}, fo({ view: "home", familyId: id, search: "", page: 0 }), { staleTime: 0 }));
-    }).then(function (d) { return d && (d.family || d); });
-  }
-  function armAttack(id, now) {
+  function attackNow(id) {
     var s = load(), t = targets(s).filter(function (x) { return String(x.id) === String(id); })[0];
-    if (!t) { return; }
-    var ours = ourAttack(), ourEnd = ours ? startOf(ours) : 0;
-    if (ours && now) { alert("We already have an attack planned on " + nameOf(ours.defender) + ". The game allows one at a time, so this one can only be queued for after that battle."); redraw(); return; }
-    if (s.autoAttack) { alert("An attack on " + s.autoAttack.name + " is already armed. Cancel it first to pick another family."); redraw(); return; }
-    var c = t.ratio ? chance(s, t.ratio) : null;
-    var expected = now ? Date.now() : Math.max(ourEnd, t.busy || ours ? t.freeAt || 0 : 0, Date.now());
-    var q = (now ? "Declare war on " + t.name + " now?" : ours ? "Declare war on " + t.name + " right after our battle against " + nameOf(ours.defender) + (expected > ourEnd ? " and their own battle" : "") + " (expected " + clock(expected) + ")?"
-      : "Declare war on " + t.name + " automatically as soon as they can be attacked" + (t.freeAt ? " (expected " + clock(t.freeAt) + ")" : "") + "?")
-      + (c != null ? "\n\nWin chance ~" + c + "%." : "")
-      + (now ? "" : "\n\nThe game has to stay open on this PC until then.");
-    if (!confirm(q)) { return; }
-    s.autoAttack = { id: t.id, name: t.name, freeAt: expected, armedAt: Date.now(), chance: c };
-    if (ours) { s.autoAttack.afterWar = ours.id; s.autoAttack.afterName = nameOf(ours.defender); }
-    save(s); attackAt = 0; attackNote = "";
-    if (!now && s.webhook) { postFor("autoattack", s.webhook, shout(ours ? "⏭️ **Next attack queued:** war on **" + md(t.name) + "** will be declared after our battle against **" + md(nameOf(ours.defender)) + "** (<t:" + Math.round(expected / 1000) + ":R>)" + (c != null ? ", ~" + c + "% win chance" : "") + "."
-      : "⏰ **Auto-attack armed:** war on **" + md(t.name) + "** will be declared as soon as they're free" + (t.freeAt ? " (<t:" + Math.round(t.freeAt / 1000) + ":R>)" : "") + (c != null ? ", ~" + c + "% win chance" : "") + ".")); }
-    redraw();
+    if (!t || attackBusy || !last) { return; }
+    var c = t.ratio ? chance(s, t.ratio) : null, famId = last.fam.id;
+    if (!confirm("Declare war on " + t.name + " now?" + (c != null ? "\n\nWin chance ~" + c + "%." : ""))) { return; }
+    attackBusy = true; attackNote = ""; redraw();
+    familyCommand().then(function (fn) {
+      return fn({ data: { requestId: crypto.randomUUID(), command: { action: "declare", familyId: famId, opponentId: t.id } } });
+    }).then(function () {
+      attackNote = "✅ War declared on " + t.name + " at " + clock(Date.now()) + ". Register for it on the Family tab.";
+      refreshFamily();
+    }, function (e) { attackNote = "⚠️ Couldn't declare war on " + t.name + ". The game said: " + (e && e.message || e); })
+      .then(function () { attackBusy = false; redraw(); });
   }
-  function disarmAttack() {
-    var s = load(), a = s.autoAttack;
-    if (!a) { return; }
-    delete s.autoAttack; save(s); attackNote = "Auto-attack on " + a.name + " cancelled.";
-    if (s.webhook) { postFor("autoattack", s.webhook, shout("🛑 Auto-attack on **" + md(a.name) + "** was cancelled.")); }
-    redraw();
-  }
-  function finishAttack(ok, text) {
-    var s = load(), a = s.autoAttack;
-    if (!a) { return; }
-    delete s.autoAttack; save(s);
-    attackNote = (ok ? "✅ " : "⚠️ ") + text;
-    if (s.webhook) {
-      postFor("autoattack", s.webhook, shout(ok ? "⚔️ **Auto-attack:** war declared on **" + md(a.name) + "** at " + clock(Date.now()) + (a.chance != null ? " (~" + a.chance + "% win chance)" : "") + ". Register for the attack on the Family tab!"
-        : "⚠️ **Auto-attack on " + md(a.name) + " stopped:** " + text));
-    }
-    redraw();
-  }
-  function checkAutoAttack() {
-    var s = load(), a = s.autoAttack, now = Date.now();
-    if (!a || attackBusy || !last || !client || now < attackAt || now < a.freeAt - ATTACK_LEAD) { return; }
-    var ours = ourAttack();
-    // Our own battle goes first. Past its start time the family list may still show it for a few minutes, so the game's answer decides from there.
-    var waiting = ours && a.afterWar !== undefined && String(ours.id) === String(a.afterWar);
-    if (waiting && now < startOf(ours)) { return; }
-    if (waiting) { ours = null; }
-    if (ours && ours.defenderId !== a.id) { finishAttack(false, "we already have an attack planned on " + nameOf(ours.defender) + ", and only one at a time is allowed."); return; }
-    if (ours) { finishAttack(true, "war on " + a.name + " is planned."); return; } // declared already (by us or by hand)
-    if (now > a.freeAt + ATTACK_GIVEUP) { finishAttack(false, "still not attackable 30 minutes after the expected time" + (a.why ? " (the game said: " + a.why + ")" : "") + "."); return; }
-    attackBusy = true; attackAt = now + ATTACK_POLL;
-    var why = function (text) { var n = load(); if (n.autoAttack) { n.autoAttack.why = text; save(n); } };
-    familyFresh(a.id).then(function (f) {
-      var wd = f && f.warDeclaration;
-      if (!wd || wd.blocked) {
-        why(wd ? String(wd.blocked) : "their family page didn't say");
-        // Attacked by someone else meanwhile: wait for that battle instead of giving up.
-        var until = (f && Array.isArray(f.scheduledWars) ? f.scheduledWars : []).filter(function (w) { return w.defenderId === a.id; }).reduce(function (m, w) { return Math.max(m, startOf(w) || 0); }, 0);
-        var n = load();
-        if (n.autoAttack && until > Date.now() && until > n.autoAttack.freeAt) {
-          n.autoAttack.freeAt = until; save(n);
-          if (n.webhook) { postFor("autoattack", n.webhook, shout("⏳ **Auto-attack on " + md(a.name) + ":** they've been attacked by someone else. Waiting for that battle, now expected <t:" + Math.round(until / 1000) + ":R>.")); }
-        }
-        return;
-      }
-      return familyCommand().then(function (fn) {
-        return fn({ data: { requestId: crypto.randomUUID(), command: { action: "declare", familyId: last.fam.id, opponentId: a.id } } });
-      }).then(function () {
-        finishAttack(true, "war declared on " + a.name + " at " + clock(Date.now()) + ".");
-        refreshFamily();
-      }, function (e) { why(String(e && e.message || e)); }); // tried again in 15 seconds
-    }).catch(function (e) { why(String(e && e.message || e)); }).then(function () { attackBusy = false; redraw(); });
-  }
-  function attackStatus(s) {
-    var a = s.autoAttack;
-    if (a) {
-      return "<div class='st wait'>" + (a.afterWar !== undefined ? "⏭ Next attack queued on <b>" : "⏰ Auto-attack armed on <b>") + esc(a.name) + "</b>: "
-        + (Date.now() < a.freeAt - ATTACK_LEAD ? (a.afterWar !== undefined ? "declaring after our battle against " + esc(a.afterName || "them") + ", " : "declaring as soon as they're free, ") + inTime(a.freeAt) : "trying now" + (a.why ? " (the game says: " + esc(a.why) + ")" : "") + "…")
-        + " <button type='button' data-disarm>Cancel</button> <span class='idle'>Cancel it to pick another family.</span></div>";
-    }
-    return attackNote ? "<div class='st " + (/^✅/.test(attackNote) ? "ok" : "") + "'>" + esc(attackNote) + "</div>" : "";
+  function attackStatus() {
+    return attackNote ? "<div class='st " + (/^✅/.test(attackNote) ? "ok" : "bad") + "'>" + esc(attackNote) + "</div>" : "";
   }
 
   // ===== Update notes =====
@@ -4271,8 +4120,8 @@ function reporter() {
       + "</div>";
   }
 
-  // The XP and cash boosts at a glance: time left of the 7 days, renewal, auto-renew and the treasury. A boost that has run
-  // out can be bought from here at +25% (same command and rights as auto-renew, after a confirmation).
+  // The XP and cash boosts at a glance: time left of the 7 days, renewal and the treasury. A boost that has run
+  // out can be bought from here at +25% (the Family tab's buy command, Godfathers and Counselors only, after a confirmation).
   var buyBusy = false;
   function leftText(ms) {
     var m = Math.max(0, Math.ceil(ms / 60000));
@@ -4283,13 +4132,12 @@ function reporter() {
     if (!p || !("xpBoost" in p || "xpBoostUntil" in p || p.boostPrices)) { return ""; }
     var price = p.boostPrices && +p.boostPrices.high, can = !p.rank || p.rank === "godfather" || p.rank === "counselor", gold = p.treasury == null ? null : +p.treasury || 0, soon = 0;
     var rows = Object.keys(BOOSTS).map(function (k) {
-      var until = boostEnd(p, k), left = until - now, on = left > 0, pct = +p[k + "Boost"] || 0, auto = s.autoBoost && s.autoBoost[k];
+      var until = boostEnd(p, k), left = until - now, on = left > 0, pct = +p[k + "Boost"] || 0;
       if (!on || left <= DAY) { soon++; }
       return "<div class='bo" + (!on ? " out" : left <= DAY ? " warn" : "") + "'><b>" + BOOSTS[k] + (on && pct ? " +" + pct + "%" : "") + "</b>"
         + "<span class='bar' title='" + (on ? "Ends " + new Date(until).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Not active") + "'><i style='width:" + (on ? Math.max(2, Math.min(100, Math.round(left / (7 * DAY) * 100))) : 0) + "%'></i></span>"
         + "<span class='left'>" + (on ? leftText(left) : "ended") + "</span>"
-        + "<span>" + (!on && can && price ? "<button type='button' class='go' data-buyboost='" + k + "'" + (buyBusy || gold != null && gold < price ? " disabled" : "") + " title='Buy +" + AUTO_PCT + "% for 7 days: " + price.toLocaleString("en-US") + " family gold'>Buy</button> " : "")
-        + (can ? "<button type='button' data-autoboost='" + k + "'" + (auto ? " class='go'" : "") + " title='Auto-renew on this PC: " + (auto ? "on" : "off") + ". Use it on one PC only.'>Auto " + (auto ? "on" : "off") + "</button>" : "") + "</span></div>";
+        + "<span>" + (!on && can && price ? "<button type='button' class='go' data-buyboost='" + k + "'" + (buyBusy || gold != null && gold < price ? " disabled" : "") + " title='Buy +" + AUTO_PCT + "% for 7 days: " + price.toLocaleString("en-US") + " family gold'>Buy</button> " : "") + "</span></div>";
     }).join("");
     var trez = "";
     if (gold != null) {
@@ -4460,7 +4308,7 @@ function reporter() {
     if (last) {
       html += "<div class='tabs'>" + [["activity", "data-home", "📊 Activity"], ["planner", "data-planner", "⚔️ War planner"], ["recruits", "data-recruits", "🧲 Recruits"], ["ranks", "data-ranks", "👑 Ranks"]].map(function (o) {
         return "<button type='button' " + o[1] + (view === o[0] ? " class='on'" : "") + ">" + o[2] + "</button>";
-      }).join("") + "</div>" + attackStatus(s); // an armed auto-attack shows on every tab
+      }).join("") + "</div>" + attackStatus(); // the result of Attack now shows on every tab
     }
     if (view === "recruits") {
       html += recruitHtml(s);
@@ -4548,13 +4396,6 @@ function reporter() {
           + "<input type='text' data-role placeholder='&lt;@&amp;123456789012345678&gt;' value='" + esc(s.warRole ? "<@&" + s.warRole + ">" : "") + "' spellcheck='false' autocomplete='off'>"
           + "<div class='row' style='margin-top:0'><button type='button' class='go' data-saverole>Save role</button>"
           + (s.warRole ? "<button type='button' data-testrole>Send test ping</button>" : "") + "</div></div>" : "")
-        + "<div style='margin-top:10px'><b>Auto-renew boosts</b>: when a boost runs out, buy +" + AUTO_PCT + "% for 7 days with family gold"
-        + "<div style='font-size:11.5px;color:var(--muted)'>Only while the game is open on this PC, and only for Godfathers and Counselors. Switch it on on one PC only."
-        + (s.webhook ? " Each purchase is posted to the leadership chat." : "") + "</div>"
-        + "<div class='row' style='margin-top:4px'>" + Object.keys(BOOSTS).map(function (k) {
-          var on = s.autoBoost && s.autoBoost[k];
-          return "<button type='button' data-autoboost='" + k + "' class='" + (on ? "go" : "") + "'>" + BOOSTS[k] + ": " + (on ? "on" : "off") + "</button>";
-        }).join("") + "</div></div>"
         + "</div>";
     }
     if (backupState === "prompt" && folder) { html += "<div class='st wait'>💾 Today's backup is waiting: the browser wants your OK for the backup folder. <button type='button' data-allowfolder>Allow</button></div>"; }
@@ -4602,10 +4443,6 @@ function reporter() {
   }
   // War planner view: our strength, then every family within ±10 ranks, best targets first; families under attack at the bottom.
   // While an attack is planned: queue this family as the next one. Shows when that would be if it's later than the end of our battle.
-  function queueButton(t, ourEnd) {
-    var at = Math.max(ourEnd, t.freeAt || 0);
-    return (at > ourEnd ? " <span class='free'>⏭ from " + clock(at) + "</span>" : "") + " <button type='button' class='inv' data-arm='" + esc(t.id) + "' title='Declare war on them automatically at " + clock(at) + (at > ourEnd ? ", once their own battle is over" : ", right after our battle") + "'>⏭ Attack next</button>";
-  }
   function plannerHtml(s) {
     var sc = s.scan, us = summary(last.fam), h = "";
     h += "<div class='stats' style='grid-template-columns:repeat(3,1fr)'>"
@@ -4613,8 +4450,8 @@ function reporter() {
       + "<div class='stat'><b>" + us.avg + "</b><span>avg member level</span></div>"
       + "<div class='stat'><b>" + (sc ? "#" + sc.own : "–") + "</b><span>our rank" + (sc ? " (can attack " + Math.max(1, sc.own - WINDOW) + "–" + (sc.own + WINDOW) + ")" : "") + "</span></div></div>";
     var ours = warsOf(last.fam).filter(function (w) { return w.status === "preparing" && w.attackerId === last.fam.id; });
-    if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ". " + (s.autoAttack ? "" : canDeclare(last.fam.private) ? "You can queue the next attack below, for right after that battle." : "") + "</div>"; }
-    var armed = s.autoAttack, mayDeclare = canDeclare(last.fam.private);
+    if (ours.length) { h += "<div class='st wait'>We already have an attack planned on " + esc(nameOf(ours[0].defender)) + (startOf(ours[0]) > Date.now() ? ": battle " + inTime(startOf(ours[0])) : "") + ". The game allows one attack at a time.</div>"; }
+    var mayDeclare = canDeclare(last.fam.private);
     if (scanning && scanning.running) { h += "<div class='st wait'>" + esc(scanning.step) + "</div>"; }
     else if (scanning && scanning.error) { h += "<div class='st bad'>Scan failed: " + esc(scanning.error) + ".</div>"; }
     // Buttons above the list, so nothing needs scrolling down.
@@ -4641,11 +4478,7 @@ function reporter() {
             + (t.freeAt ? " <span class='free'>⏳ free " + inTime(t.freeAt) + "</span>" : "")
             : t.attacked ? " <span class='free now'>✅ free since " + clock(t.freeAt) + "</span>"
             : t.attacking ? " <span class='idle'>attacking" + (on && on !== "?" ? " " + esc(on) : "") + "</span>" : "")
-          + (!mayDeclare ? "" : armed && String(armed.id) === String(t.id) ? " <span class='free'>⏰ armed</span>"
-            : armed ? "" // one armed or queued attack at a time
-            : ours.length ? queueButton(t, startOf(ours[0]))
-            : t.busy ? " <button type='button' class='inv' data-arm='" + esc(t.id) + "' title='Declare war on them automatically as soon as they can be attacked'>⏰ Attack when free</button>"
-            : " <button type='button' class='inv' data-attacknow='" + esc(t.id) + "'>⚔️ Attack now</button>") + "</td>"
+          + (!mayDeclare || ours.length || t.busy ? "" : " <button type='button' class='inv' data-attacknow='" + esc(t.id) + "'" + (attackBusy ? " disabled" : "") + ">⚔️ Attack now</button>") + "</td>"
           + "<td>" + (t.level || "?") + "</td><td>" + (t.members || "?") + "</td><td>" + (t.sum ? t.sum.avg : "?") + "</td><td>" + (t.sum ? t.sum.top5 : "?") + "</td>"
           + "<td>" + (t.honor || 0).toLocaleString("en-US") + "</td><td title='Their strength " + (t.sum ? t.sum.strength.toLocaleString("en-US") : "?") + (t.ratio ? ", we are " + t.ratio.toFixed(2) + "× as strong" : "") + "'>" + r[0] + " "
           + (c != null ? (learned(s) ? "" : "~") + c + "%" : "?") + "</td></tr>";
@@ -4836,12 +4669,6 @@ function reporter() {
     var field = kind === "war" ? "warHook" : kind === "board" ? "boardHook" : kind === "level" ? "lvHook" : "webhook";
     if (t.hasAttribute("data-weekly")) { sendWeekly(true); return; }
     if (t.hasAttribute("data-awards")) { sendAwards(true); return; }
-    if (t.hasAttribute("data-autoboost")) {
-      var ab = t.getAttribute("data-autoboost");
-      s.autoBoost = s.autoBoost || {};
-      if (!s.autoBoost[ab] && !confirm("Renew the " + BOOSTS[ab] + " boost automatically?\n\nWhen it runs out, +" + AUTO_PCT + "% for 7 days is bought with family gold (at the game's current price) while the game is open on this PC. If it has already run out, it is bought right away.")) { return; }
-      s.autoBoost[ab] = !s.autoBoost[ab]; save(s); redraw(); return;
-    }
     if (t.hasAttribute("data-backup")) { downloadBackup(); return; }
     if (t.hasAttribute("data-pickfolder")) { chooseFolder(); return; }
     if (t.hasAttribute("data-allowfolder")) { allowFolder(); return; }
@@ -4857,9 +4684,7 @@ function reporter() {
     if (t.hasAttribute("data-ranks")) { showRanks = true; showPlanner = showRecruits = false; redraw(); return; }
     if (t.hasAttribute("data-weakall")) { weakAll = !weakAll; redraw(); return; }
     if (t.hasAttribute("data-postranks")) { postRanks().then(function () { if (!fails.ranks) { alert("Posted to the leadership chat."); } }); return; }
-    if (t.hasAttribute("data-arm")) { armAttack(t.getAttribute("data-arm"), false); return; }
-    if (t.hasAttribute("data-attacknow")) { armAttack(t.getAttribute("data-attacknow"), true); return; }
-    if (t.hasAttribute("data-disarm")) { if (confirm("Cancel the automatic attack?")) { disarmAttack(); } return; }
+    if (t.hasAttribute("data-attacknow")) { attackNow(t.getAttribute("data-attacknow")); return; }
     if (t.hasAttribute("data-pshow") || t.hasAttribute("data-psort")) {
       var pv = planView(s);
       if (t.hasAttribute("data-pshow")) { pv.show = t.getAttribute("data-pshow"); } else { pv.sort = t.getAttribute("data-psort"); }
@@ -4895,8 +4720,6 @@ function reporter() {
     if (t.hasAttribute("data-dmsgopen")) { dmsgOpen = !dmsgOpen; redraw(); return; }
     if (t.hasAttribute("data-dmsgtest")) { var dto = box && box.querySelector("[data-dmsgto]"); messageTest(dto && dto.value, true); return; }
     if (t.hasAttribute("data-dmsgreset")) { delete s.dcMsg; save(s); redraw(); return; }
-    if (t.hasAttribute("data-inviteall")) { inviteAll(); return; }
-    if (t.hasAttribute("data-invstop")) { if (inviteJob) { inviteJob.running = false; } redraw(); return; }
     if (t.hasAttribute("data-copyall")) { copyText(recruitList(s).map(function (p) { return p.name; }).join("\n")); alert("Copied " + recruitList(s).length + " names, one per line."); return; }
     if (t.hasAttribute("data-postrecruits")) { postRecruits().then(function () { if (!fails.recruits) { alert("Posted to the leadership chat."); } }); return; }
     if (t.hasAttribute("data-scan")) { runScan(); return; }
@@ -4964,7 +4787,7 @@ function reporter() {
   // ===== Extras: effects, sounds and the voice =====
   // Just for fun, each with a switch per PC in the panel's Extras (s.fx = {name: true or false}). The voice starts switched off, since a
   // talking panel shouldn't surprise anyone; the rest starts on. Nothing here posts to Discord except the Most Wanted poster.
-  var FX_ON = { autojoin: false, popMission: false, popGang: false, sound: true, voice: false, voiceRemind: true, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
+  var FX_ON = { popMission: false, popGang: false, sound: true, voice: false, voiceRemind: true, alert: true, warfx: true, fireworks: true, ticker: true, radar: true, poster: true };
   var showExtras = false, fxQueue = [], fxActive = null, fxStyleEl = null;
   function fxOn(s, k) { return s.fx && typeof s.fx[k] === "boolean" ? s.fx[k] : FX_ON[k]; }
   function fxStyle() {
@@ -5273,7 +5096,6 @@ function reporter() {
   // A timer never seen counting down here, or that ran out over 10 minutes ago, isn't news. Energy is said once each time it fills up, also if it was already full.
   var REMIND_LINES = { gang: "Gang war is ready.", survival: "Survival is ready.", wanted: "Your wanted attack is ready.", duel: "Your free duel is ready.", energy: "Your energy is full.",
     weapon: "The black market has new goods.", food: "The corner shop has new goods.", eaten: "Your food has run out.", vehicle: "Your mission vehicle has run out.", crew: "A crew member has run out.", boostxp: "The family XP boost has ended.", boostcash: "The family cash boost has ended." };
-  var JOIN_FAILED_LINE = "I could not sign you up for the war. Please do it yourself.";
   function checkReminders() {
     var s = load();
     if (!client || !fxOn(s, "voice") || !fxOn(s, "voiceRemind")) { return; }
@@ -5298,10 +5120,7 @@ function reporter() {
       (me.food || []).forEach(function (f) { var it = f && f.item; if (it && it.usedAt && it.durationDays) { due("eaten" + it.id, timeOf(it.usedAt) + it.durationDays * DAY, "eaten"); } });
     }
     var fp = last && last.fam && last.fam.private;
-    if (fp) { // a boost that auto-renews on this PC is about to be bought again, so that isn't news
-      var renews = autoOn(s, fp);
-      ["xp", "cash"].forEach(function (k) { if (!renews[k]) { due("boost" + k, boostEnd(fp, k), "boost" + k); } });
-    }
+    if (fp) { ["xp", "cash"].forEach(function (k) { due("boost" + k, boostEnd(fp, k), "boost" + k); }); }
     if (me && typeof me.energy === "number") {
       if (me.energy >= 100 && !said.full) { said.full = true; changed = true; speak(REMIND_LINES.energy); }
       else if (me.energy < 95 && said.full) { said.full = false; changed = true; }
@@ -5773,75 +5592,6 @@ function reporter() {
     if (changed) { save(s); }
   }
 
-  // ----- Auto-join wars: signs this player up for every planned attack and defence they may fight in, with the same command as the
-  // game's own Register button. It acts as soon as a war is seen, since nobody knows if the game will still be open later in the 10 hours.
-  // The game's data is loaded fresh first. s.joined = {war id: {at, what, start}} remembers sign-ups made here for a day,
-  // s.joinTry = {war id: {n, at, why}} refusals, tried again every 10 minutes until the battle, because the 10 hours may outlast a bad spell.
-  var JOIN_GAP = 10 * 60000, JOIN_KEEP = 24 * 3600000, joinBusy = false;
-  function warOpenToMe(fam, w) { // the game's own conditions for its Register button
-    return w.status === "preparing" && (w.attackerId === fam.id || w.defenderId === fam.id) && startOf(w) > Date.now() + 30000;
-  }
-  function amRegistered(w) {
-    var me = duelMe();
-    return !!w.registered || !!me && (w.registeredUsers || []).some(function (id) { return String(id) === String(me.id); });
-  }
-  function joinable(fam) {
-    return warsOf(fam).filter(function (w) { return warOpenToMe(fam, w) && !amRegistered(w) && w.eligible !== false; });
-  }
-  function joinPopup(tag, title, body) {
-    if (window.Notification && Notification.permission === "granted") { showPopup(tag, title, body, PAGE); }
-  }
-  function checkAutoJoin() {
-    var s = load();
-    if (!fxOn(s, "autojoin") || joinBusy || !client) { return; }
-    if (!last) { loadOwnFamily(location.pathname.replace(/\/+$/, "")); return; } // with the panel closed nothing else loads the family
-    if (navigator.onLine === false) { return; }
-    var now = Date.now(), joined = s.joined || {}, tries = s.joinTry || {};
-    var w = joinable(last.fam).filter(function (x) { return !joined[x.id] && (!tries[x.id] || now - tries[x.id].at >= JOIN_GAP); })[0];
-    if (!w) { return; }
-    var q = last.query, famId = last.fam.id, warId = w.id;
-    joinBusy = true;
-    (q && typeof q.fetch === "function" && q.options && q.options.queryFn ? q.fetch().catch(function () { return q.state.data; }) : Promise.resolve(q && q.state.data)).then(function (d) {
-      var fam = d && (Array.isArray(d.members) ? d : d.family);
-      var cur = (fam ? joinable(fam) : [w]).filter(function (x) { return x.id === warId; })[0];
-      if (!cur) { return; } // signed up elsewhere in the meantime, or the battle has begun
-      var side = warSide(fam || last.fam, cur), what = (side.attack ? "attack on " : "defence against ") + nameOf(side.attack ? cur.defender : cur.attacker);
-      return familyCommand().then(function (fn) {
-        return fn({ data: { requestId: crypto.randomUUID(), command: { action: "participate", familyId: famId, warId: warId, registered: true } } });
-      }).then(function () {
-        var n = load(), keep = {};
-        n.joined = n.joined || {}; n.joined[warId] = { at: Date.now(), what: what, start: startOf(cur) };
-        Object.keys(n.joined).forEach(function (id) { if (Date.now() - n.joined[id].at < JOIN_KEEP) { keep[id] = n.joined[id]; } });
-        n.joined = keep;
-        if (n.joinTry) { delete n.joinTry[warId]; }
-        save(n);
-        joinPopup("join" + warId, "⚔️ You're in the war", "Signed up for the " + what + ". Battle at " + clock(startOf(cur)) + ".");
-        refreshFamily();
-      }, function (e) {
-        var n = load(), t = n.joinTry && n.joinTry[warId], count = (t ? t.n : 0) + 1;
-        n.joinTry = n.joinTry || {}; n.joinTry[warId] = { n: count, at: Date.now(), what: what, why: String(e && e.message || e) };
-        save(n);
-        if (count === 3) {
-          joinPopup("join" + warId, "⚠️ Couldn't join the war", "The " + what + ": sign up on the Family tab.");
-          if (fxOn(n, "voiceRemind")) { speak(JOIN_FAILED_LINE); }
-        }
-      });
-    }).catch(function () {}).then(function () { joinBusy = false; redraw(); });
-  }
-  function joinHtml(s) {
-    var fam = last && last.fam, wars = fam ? warsOf(fam).filter(function (w) { return warOpenToMe(fam, w); }) : [], joined = s.joined || {}, tries = s.joinTry || {}, shown = {}, lines = [];
-    Object.keys(joined).sort(function (a, b) { return joined[b].at - joined[a].at; }).forEach(function (id) {
-      if (Date.now() - joined[id].at < JOIN_KEEP) { shown[id] = 1; lines.push("<div class='st ok'>✅ Signed up for the " + esc(joined[id].what) + " at " + clock(joined[id].at) + ".</div>"); }
-    });
-    wars.forEach(function (w) {
-      if (shown[w.id]) { return; }
-      var foe = nameOf(w.attackerId === fam.id ? w.defender : w.attacker);
-      if (amRegistered(w)) { lines.push("<div class='st ok'>✅ You're signed up against " + esc(foe) + ".</div>"); }
-      else if (w.eligible === false) { lines.push("<div class='st'>You can't fight " + esc(foe) + ": you needed 12 hours in the family when that war was declared.</div>"); }
-      else if (tries[w.id]) { lines.push("<div class='st bad'>Couldn't sign up against " + esc(foe) + ", trying again every 10 minutes. The game said: " + esc(tries[w.id].why) + "</div>"); }
-    });
-    return lines.join("");
-  }
 
   // ----- The Extras menu -----
   function extrasHtml(s) {
@@ -5852,13 +5602,11 @@ function reporter() {
     var intro = "<div class='xrow' title='Plays over the panel when the game loads. A click skips it.'><span class='xn'>🖥️ Startup animation</span><button type='button' data-introtoggle>" + (s.intro === false ? "Off" : "On") + "</button>" + test("intro", "Play") + "</div>";
     var voices = voiceList(), current = voicePick(s), vol = typeof s.voiceVol === "number" ? s.voiceVol : 80;
     var h = "<div class='setup'><b>Extras on this PC</b><div style='font-size:11.5px;color:var(--muted)'>Mostly for fun.</div>"
-      + row("autojoin", "⚔️ Auto-join wars", "Signs you up for every attack and defence you may fight in, as soon as it shows up. Once you're signed up, the game has no button to take it back.")
-      + (fxOn(s, "autojoin") ? "<div style='font-size:11.5px;color:var(--muted)'>The game has to be open at some point in the 10 hours before the battle. If it stays closed the whole time, nothing can sign you up.</div>" + joinHtml(s) : "")
       + intro
       + row("voice", "🗣️ JARVIS voice", "Greets you and calls out battles, your mission, levels and war results. Browsers only let it talk after your first click on the page.", test("voice", "Test"))
       + (fxOn(s, "voice") && voices.length ? (s.elKey ? "" : "<div class='xrow'><span class='xn'>Voice</span><select data-voicepick>" + voices.map(function (v) { return "<option value='" + esc(v.name) + "'" + (current && current.name === v.name ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") + "</select></div>")
         + "<div class='xrow'><span class='xn'>Voice volume</span><input type='range' min='0' max='100' step='5' value='" + vol + "' data-voicevol></div>"
-        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + row("voiceRemind", "⏰ Voice reminders", "Says when your gang war, survival, wanted attack or free duel is ready, when a shop has new goods, when your food, mission vehicle, a crew member or a family boost runs out, when your energy is full, and when auto-join fails. City timers only count for the city you're in, once you've opened their page there. The game has to be open.") + elHtml(s) : "")
+        + "<div class='xrow' title='How the voice says your name. Spell it how it sounds.'><span class='xn'>Call me</span><input type='text' data-voicecall value='" + esc(s.voiceCall || "") + "' placeholder='" + esc(spokenName(fxMe().name)) + "' spellcheck='false' autocomplete='off' style='max-width:150px'></div>" + row("voiceRemind", "⏰ Voice reminders", "Says when your gang war, survival, wanted attack or free duel is ready, when a shop has new goods, when your food, mission vehicle, a crew member or a family boost runs out, and when your energy is full. City timers only count for the city you're in, once you've opened their page there. The game has to be open.") + elHtml(s) : "")
       + row("popMission", "🔔 Pop-up: mission ready", "A Windows pop-up when your mission is done, also when the game is in the background. Click it to open the bar. The game has to be open.", test("popMission", "Test"))
       + row("popGang", "🔔 Pop-up: gang war ready", "A Windows pop-up when you can fight again. Each city counts once you've opened its gang war map. The game has to be open.", test("popGang", "Test"))
       + (popNote ? "<div class='st bad'>" + esc(popNote) + "</div>" : "")
@@ -6107,12 +5855,9 @@ function reporter() {
     autoMonthly();
     checkRoster();
     checkBoosts();
-    checkAutoBoost();
     checkDonations();
     autoBackup();
     checkDebriefs();
-    checkAutoAttack();
-    checkAutoJoin();
     checkEvening();
     autoRecruits();
     checkRecord();
