@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.34.0
+// @version      2.34.1
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.34.0";
+  var VERSION = "2.34.1";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.34.1": [
+      "Duel win chances, your damage, learning from mail and the gang war work again. A game update moved the game's fight code to another file, and the tools now find it wherever it is."
+    ],
     "2.34.0": [
       "Mission picker: missions that also give gold (now and then one does, 5 to 75 gold) are highlighted in gold, with how much they give, and named above the list."
     ],
@@ -3528,7 +3531,7 @@ function reporter() {
     }
     return h;
   }
-  // Missions with gold: only about 1 in 30 has some, so they're pointed out (not scored: gold buys things cash can't).
+  // Missions with gold: about 1 in 10 has some since Nov 9 (energy × 10 × 0.75–1.25 gold), so they're pointed out (not scored: gold buys things cash can't).
   function mqGoldLine() {
     var g = missions.filter(function (m) { return m.gold; }).sort(function (a, b) { return b.gold - a.gold; });
     return g.length ? "<div class='mqgold'>🪙 Gold mission" + (g.length > 1 ? "s" : "") + ": " + g.map(function (m) { return "<b>" + esc(m.name) + "</b> gives <b>" + m.gold + " gold</b>"; }).join(" · ") + "</div>" : "";
@@ -3568,7 +3571,10 @@ function reporter() {
     var dir = idx.replace(/index-[\w-]+\.js.*$/, "");
     return fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
       var file = function (name) { var m = t.match(new RegExp("(?:^|[^\\w-])(" + name + "-[\\w-]+\\.js)")); if (!m) { throw new Error("the game's " + name + " file wasn't found (the game may have changed)"); } return dir + m[1]; };
-      return Promise.all([import(file("computeFight")), import(file("Random")), import(file("duels"))]);
+      return fightFile(t, dir).then(function (fight) {
+        if (!fight) { throw new Error("the game's fight code wasn't found (the game may have changed)"); }
+        return Promise.all([import(fight), import(file("Random")), import(file("duels"))]);
+      });
     }).then(function (got) {
       var kit = { fight: null, Rnd: null, opponent: null, duel: null, damage: null, fighter: null, stats: null };
       Object.keys(got[0]).forEach(function (k) {
@@ -3589,6 +3595,18 @@ function reporter() {
       duelKit = kit;
       return kit;
     });
+  }
+  // The file with the game's fight code: the files named computeFight or wantedStats first, then every other file the game lists,
+  // ten at a time, until one has the fight, the fighter builder and the fight result in it.
+  function fightFile(t, dir) {
+    var all = (t.match(/[\w-]+-[\w-]+\.js/g) || []).filter(function (n, i, a) { return a.indexOf(n) === i && !/^index-/.test(n); });
+    var first = all.filter(function (n) { return /^(computeFight|wantedStats)-/.test(n); }), rest = all.filter(function (n) { return first.indexOf(n) < 0; });
+    var has = function (n) { return fetch(dir + n).then(function (r) { return r.ok ? r.text() : ""; }).then(function (src) { return /aggressors/.test(src) && /fight_result/.test(src) && /thrownItemIds/.test(src) ? dir + n : null; }, function () { return null; }); };
+    var look = function (list, i) {
+      if (i >= list.length) { return Promise.resolve(null); }
+      return Promise.all(list.slice(i, i + 10).map(has)).then(function (hits) { return hits.filter(Boolean)[0] || look(list, i + 10); });
+    };
+    return look(first, 0).then(function (u) { return u || look(rest, 0); });
   }
   function duelMe() {
     var q = client && client.getQueryCache().find({ queryKey: ["getMe"] }), d = q && q.state.data;
