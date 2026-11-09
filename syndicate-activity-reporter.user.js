@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.34.1
+// @version      2.34.2
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.34.1";
+  var VERSION = "2.34.2";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.34.2": [
+      "Mission picker: gold missions show up now. The game doesn't send the gold with the missions, so the picker works it out the way the game does, and only shows it when that matches the game's missions."
+    ],
     "2.34.1": [
       "Duel win chances, your damage, learning from mail and the gang war work again. A game update moved the game's fight code to another file, and the tools now find it wherever it is."
     ],
@@ -3347,7 +3350,7 @@ function reporter() {
     return L ? { L: L, k: LV_POINTS * STAT_PRICE / xpStep(L) } : null;
   }
   var MQ_TIERS = { cash: ["Item", "", false], gold1: ["Gold", "#c9961a", false], gold2: ["Gold II", "#c9961a", false], gold3: ["Gold III", "#c9961a", false], epic1: ["Epic", "#e0524f", true], epic2: ["Epic II", "#e0524f", true], legendary: ["Legendary", "#9b5fd0", true], unique: ["Unique", "#2fa3d6", true] };
-  var missions = [], mqItems = null, mqItemsLoading = false;
+  var missions = [], mqItems = null, mqItemsLoading = false, mqGen = null, mqGenLoading = false;
   function mqNice(g) { return MQ_NAMES[g] || String(g || "Mission").split("_").map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(" "); }
   function mqIsQuest(q) { return !!q && typeof q === "object" && typeof q.energy === "number" && (typeof q.xp === "number" || typeof q.cash === "number"); }
   function mqPick(d, depth) {
@@ -3358,10 +3361,37 @@ function reporter() {
   function readMissions() {
     var q = client && client.getQueryCache().find({ queryKey: ["getAvailableQuests"] }), got = q ? mqPick(q.state.data, 0) : [];
     if (!got.length) { return; }
+    var gold = mqGold(got);
     missions = got.map(function (m) {
-      return { id: m.id, name: mqNice(m.giver), energy: m.energy, xp: m.xp || 0, cash: m.cash || 0, gold: +m.gold > 0 ? +m.gold : 0, item: m.item && m.item.id ? { id: String(m.item.id), tier: m.item.tier || "", raw: m.item } : null };
+      return { id: m.id, name: mqNice(m.giver), energy: m.energy, xp: m.xp || 0, cash: m.cash || 0, gold: +m.gold > 0 ? +m.gold : gold[m.id] || 0, item: m.item && m.item.id ? { id: String(m.item.id), tier: m.item.tier || "", raw: m.item } : null };
     }).filter(function (m) { return m.energy > 0; });
     if (missions.some(function (m) { return m.item; })) { loadMqItems(); }
+  }
+  // Gold per mission id, from the game's own mission code run on your character ({} until that code is loaded, or if it doesn't match).
+  function mqGold(got) {
+    var me = duelMe(), out = {};
+    if (!mqGen) { loadMqGen(); return out; }
+    if (!me || me.id == null || typeof me.questsCompleted !== "number") { return out; }
+    try {
+      var mine = mqGen(me, Date.now()) || [], byId = {};
+      mine.forEach(function (m) { if (m && m.id != null) { byId[m.id] = m; } });
+      got.forEach(function (m) { var g = byId[m.id]; if (g && +g.gold > 0) { out[m.id] = Math.round(+g.gold); } });
+    } catch (e) {}
+    return out;
+  }
+  function loadMqGen() {
+    if (mqGen || mqGenLoading) { return; }
+    var idx = performance.getEntriesByType("resource").map(function (e) { return e.name; }).filter(function (n) { return /\/assets\/index-[\w-]+\.js/.test(n); })[0];
+    if (!idx) { return; }
+    mqGenLoading = true;
+    fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
+      var m = t.match(/(?:^|[^\w-])(getAvailableQuests-[\w-]+\.js)/);
+      if (!m) { throw new Error("no mission file"); }
+      return import(idx.replace(/index-[\w-]+\.js.*$/, m[1]));
+    }).then(function (mod) {
+      Object.keys(mod).forEach(function (k) { var f = mod[k]; if (typeof f === "function" && /questsCompleted/.test(String(f)) && /missionBooster/.test(String(f))) { mqGen = f; } });
+      if (mqGen) { mqGenLoading = false; readMissions(); redraw(); }
+    }).catch(function () {}); // failed: stays loading, so it isn't tried again on every redraw
   }
   // Item names and pictures come from the game's own item table, in its ItemImg script file.
   function loadMqItems() {
