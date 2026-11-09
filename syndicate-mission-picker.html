@@ -299,7 +299,8 @@ kbd {
     <summary>Mission Reader: see the best mission right in the game</summary>
     <p class="intro">Mission Reader is a bookmark. Click it while you play and a small panel shows which of the 3 missions gives you the most for your energy. You set it up once, which takes about a minute. It works on a computer in Chrome, Edge, Brave or Opera.</p>
 
-    <h3>Set it up (once)</h3>
+    <h3>Set it up (once) <span class="tag">New: version 8</span></h3>
+    <p class="intro"><strong>Already have Mission Reader?</strong> Your bookmark keeps the old version. Delete it from your bookmarks bar (right-click it, then <strong>Delete</strong>), then do the steps below again to get gold missions, the Stats mode and the energy line.</p>
     <ol class="steps">
       <li>Make your bookmarks bar visible: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>. A bar appears under the address bar. On a Mac, press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>.</li>
       <li>Hold down the mouse on this red button and drag it up onto that bar. Let go there.
@@ -334,6 +335,9 @@ kbd {
     <ul class="steps">
       <li>You only click the bookmark once per visit. The panel hides by itself when you leave the Godfather bar and comes back when you return.</li>
       <li>If you reload the game page (F5) or open it again later, click the bookmark again.</li>
+      <li>A gold <strong>&#129689; +N gold</strong> tag means that mission also gives you gold. About 1 in 10 missions do, and the panel names them above the list.</li>
+      <li><strong>Stats</strong> picks the mission that makes you strongest per energy: it counts cash as stat points and XP as levels.</li>
+      <li>The line under the name shows your energy and how many times you can do the best mission. When you're short, it says when you'll have enough.</li>
       <li>A tag like <strong>Gold</strong> or <strong>Legendary</strong> next to a name means that mission also gives an item. The higher the tier, the better the item: Item, Gold, Epic, Legendary, Unique. Epic and better ones glow.</li>
       <li>Drag the panel by its top edge to move it. <strong>&ndash;</strong> makes it small, <strong>&#9680;</strong> switches between dark and light, <strong>&times;</strong> closes it.</li>
     </ul>
@@ -372,7 +376,7 @@ kbd {
 <script type="text/plain" id="reader-src">
 (function () {
   // A newer copy (updated bookmark or userscript) replaces one that is already running on the page.
-  var VERSION = 7;
+  var VERSION = 8;
   var running = window.__mrReader;
   if (running && running.version >= VERSION) { running.show(); return; }
   if (running && running.stop) { running.stop(); }
@@ -398,7 +402,12 @@ kbd {
     dwayne: "miami", jose: "miami", isabel: "miami", carlos: "miami",
     madam_chow: "hk", mei: "hk", wing: "hk", ah_keung: "hk", suki: "hk"
   };
-  var MODES = { xp: { w: 1, label: "XP", title: "Best for XP" }, balanced: { w: 0.5, label: "Balanced", title: "Best balanced" }, cash: { w: 0, label: "Cash", title: "Best for cash" } };
+  var MODES = { xp: { w: 1, label: "XP", title: "Best for XP" }, balanced: { w: 0.5, label: "Balanced", title: "Best balanced" }, cash: { w: 0, label: "Cash", title: "Best for cash" }, stats: { w: null, label: "Stats", title: "Best for stats" } };
+  // Stats mode: what a mission adds to your stats per energy. Cash buys stat points at 1,500 each; a level is worth about
+  // LV_POINTS bought points. Score = cash/E + XP/E x LV_POINTS x 1,500 / XP the next level needs (the game's level curve).
+  var LV_POINTS = 33, STAT_PRICE = 1500, XP_LOW = [0, 0, 5, 11, 24, 48, 90, 156, 253, 389];
+  function xpStep(L) { return L < 9 ? XP_LOW[L + 1] - XP_LOW[L] : 0.55 * Math.pow(L, 2.6064 + 0.01349 * Math.log(L)); }
+  function levelOfXp(xp) { var L = 1, need = 0; while (L < 2000 && Math.floor(need + xpStep(L)) <= xp) { need += xpStep(L); L++; } return L; }
   var prefs = { mode: "balanced", min: false, skin: "dark", pos: null, region: "ny" };
   try {
     var saved = JSON.parse(localStorage.getItem("mr-reader") || "{}");
@@ -442,6 +451,54 @@ kbd {
     var tier = TIERS[it.tier] || [it.tier ? nice(it.tier) : "Item", "", false];
     return { name: def.name || nice(it.id), img: def.img || "", label: tier[0], color: tier[1] || "var(--muted)", rare: tier[2] };
   }
+
+  // Your character, from the game's data ("getMe"): energy, XP, and what the game needs to make your missions.
+  function me() {
+    var q = client && client.getQueryCache().find({ queryKey: ["getMe"] }), d = q && q.state.data;
+    return d && (typeof d.energy === "number" ? d : d.user && typeof d.user.energy === "number" ? d.user : null);
+  }
+  // The game's server sends the missions without their gold (the game only shows it after the fight). The game makes the
+  // missions from a fixed seed, so its own mission code, run on your character, gives the same missions with their gold.
+  // A mission's id is drawn right before its gold, so the gold is only used when the ids match.
+  var gen = null, genLoading = false;
+  function loadGen() {
+    if (gen || genLoading) { return; }
+    var idx = null;
+    performance.getEntriesByType("resource").some(function (e) { if (/\/assets\/index-[\w-]+\.js/.test(e.name)) { idx = e.name; return true; } return false; });
+    if (!idx) { return; }
+    genLoading = true;
+    fetch(idx).then(function (r) { return r.text(); }).then(function (t) {
+      var m = t.match(/(?:^|[^\w-])(getAvailableQuests-[\w-]+\.js)/);
+      if (!m) { throw new Error("no mission file"); }
+      return import(idx.replace(/index-[\w-]+\.js.*$/, m[1]));
+    }).then(function (mod) {
+      Object.keys(mod).forEach(function (k) { var f = mod[k]; if (typeof f === "function" && /questsCompleted/.test(String(f)) && /missionBooster/.test(String(f))) { gen = f; } });
+      if (gen) { genLoading = false; lastKey = ""; }
+    }).catch(function () {}); // failed: stays loading, so it isn't tried again every tick
+  }
+  function goldOf(quests) {
+    var c = me(), out = {};
+    if (!gen) { loadGen(); return out; }
+    if (!c || c.id == null || typeof c.questsCompleted !== "number") { return out; }
+    try {
+      var byId = {};
+      (gen(c, Date.now()) || []).forEach(function (m) { if (m && m.id != null) { byId[m.id] = m; } });
+      quests.forEach(function (q) { var g = byId[q.id]; if (g && +g.gold > 0) { out[q.id] = Math.round(+g.gold); } });
+    } catch (e) {}
+    return out;
+  }
+  // Energy goes up by 1 every 13 minutes by the clock (:00, :13, :26, :39, :52 UTC). When there's enough for `cost`.
+  function energyReadyAt(have, cost) {
+    var t = Date.now(), n = Math.ceil(cost - have - 1e-9);
+    for (var i = 0; i < n; i++) {
+      var d = new Date(t), next = Math.ceil((d.getUTCMinutes() + 1) / 13) * 13;
+      if (next >= 60) { d.setUTCHours(d.getUTCHours() + 1, 0, 0, 0); } else { d.setUTCMinutes(next, 0, 0); }
+      t = d.getTime();
+    }
+    return t;
+  }
+  function waitText(ms) { var m = Math.max(1, Math.round(ms / 60000)); return m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + " min"; }
+  function clock(t) { return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
 
   function nice(g) {
     if (NAMES[g]) { return NAMES[g]; }
@@ -497,14 +554,16 @@ kbd {
   }
 
   function rank() {
-    var w = MODES[prefs.mode].w, maxX = 0, maxC = 0;
+    var w = MODES[prefs.mode].w, maxX = 0, maxC = 0, maxV = 0, c = me(), L = c && typeof c.xp === "number" ? levelOfXp(c.xp) : 0;
+    var sw = w === null && L ? { L: L, k: LV_POINTS * STAT_PRICE / xpStep(L) } : null;
+    if (w === null && !sw) { w = 0.5; } // your level isn't known yet: rank as Balanced until it is
     list.forEach(function (m) {
-      m.xpr = m.xp / m.energy; m.cr = m.cash / m.energy;
-      maxX = Math.max(maxX, m.xpr); maxC = Math.max(maxC, m.cr);
+      m.xpr = m.xp / m.energy; m.cr = m.cash / m.energy; m.val = sw ? m.cr + sw.k * m.xpr : 0;
+      maxX = Math.max(maxX, m.xpr); maxC = Math.max(maxC, m.cr); maxV = Math.max(maxV, m.val);
     });
-    var r = { bx: null, bc: null, bs: null };
+    var r = { bx: null, bc: null, bs: null, sw: sw };
     list.forEach(function (m) {
-      m.score = (w * (maxX ? m.xpr / maxX : 0) + (1 - w) * (maxC ? m.cr / maxC : 0)) * 100;
+      m.score = sw ? (maxV ? m.val / maxV * 100 : 0) : (w * (maxX ? m.xpr / maxX : 0) + (1 - w) * (maxC ? m.cr / maxC : 0)) * 100;
       if (!r.bx || m.xpr > r.bx.xpr) { r.bx = m; }
       if (!r.bc || m.cr > r.bc.cr) { r.bc = m; }
       if (!r.bs || m.score > r.bs.score) { r.bs = m; }
@@ -546,10 +605,28 @@ kbd {
     + "#ID .seg{display:inline-flex;border:1px solid var(--strong);border-radius:6px;overflow:hidden}"
     + "#ID .seg button{border:0;border-radius:0;padding:5px 8px}#ID .seg button+button{border-left:1px solid var(--strong)}"
     + "#ID .seg button.on{background:var(--accent);color:var(--on-accent,#fff)}"
-    + "#ID .ver{margin-top:6px;text-align:right;font-size:10px;color:var(--muted)}#ID p{margin:8px 0 0}";
+    + "#ID .ver{margin-top:6px;text-align:right;font-size:10px;color:var(--muted)}#ID p{margin:8px 0 0}"
+    + "#ID .gb{display:inline-block;margin-left:6px;padding:0 7px;border-radius:999px;font:700 10px/1.6 system-ui,sans-serif;background:#f2c94c;color:#2b1d00;vertical-align:1px;white-space:nowrap}"
+    + "#ID tr.gold td{background:color-mix(in srgb,#f2c94c 16%,transparent)}#ID tr.gold td:first-child{box-shadow:inset 3px 0 0 #f2c94c}"
+    + "#ID .gline{font-size:12px;margin:0 0 6px;padding:5px 8px;border-radius:6px;border:1px solid #c9961a;color:#c9961a;background:color-mix(in srgb,#f2c94c 10%,transparent)}#ID .gline b{color:var(--fg)}"
+    + "#ID .en{font-size:12px;color:var(--muted);margin:0 0 6px}#ID .en b{color:var(--fg)}#ID .en.warn{color:#c9961a}"
+    + "#ID .note{font-size:11px;color:var(--muted);margin:0 0 6px}#ID td.short{color:#c9961a}";
 
   function badge(it) {
     return "<span class='ib" + (it.rare ? " rare" : "") + "' style='--c:" + it.color + "'>" + esc(it.label) + "</span>";
+  }
+  // About 1 in 10 missions also gives gold (energy x 10, give or take a quarter). Pointed out, not scored: gold buys what cash can't.
+  function goldLine() {
+    var g = list.filter(function (m) { return m.gold; }).sort(function (a, b) { return b.gold - a.gold; });
+    return g.length ? "<div class='gline'>&#129689; Gold mission" + (g.length > 1 ? "s" : "") + ": " + g.map(function (m) { return "<b>" + esc(m.name) + "</b> gives <b>" + m.gold + " gold</b>"; }).join(" &middot; ") + "</div>" : "";
+  }
+  function energyLine(best) {
+    var c = me();
+    if (!c || !best) { return ""; }
+    var have = c.energy, short = best.energy - have, runs = Math.floor(have / best.energy + 1e-9);
+    return "<div class='en" + (short > 0 ? " warn" : "") + "'>&#9889; Energy <b>" + have.toFixed(1) + "</b> &middot; " + esc(best.name) + " needs <b>" + best.energy + "</b>"
+      + (short > 0 ? ": enough in <b>" + waitText(energyReadyAt(have, best.energy) - Date.now()) + "</b> (" + clock(energyReadyAt(have, best.energy)) + ")" + (c.familyDrinks > 0 ? ". A free family drink gives +20" : "")
+        : ", enough for <b>" + runs + "</b> run" + (runs === 1 ? "" : "s")) + "</div>";
   }
 
   function draw() {
@@ -590,14 +667,20 @@ kbd {
         html += "<div class='top' title='Drag to move, double-click to reset'><span class='t grow'>" + mode.title + "</span>" + seg + skin
           + "<button type='button' class='icon' data-min title='Minimize'>&ndash;</button>" + close + "</div>"
           + "<hr><div class='pick'>" + esc(r.bs.name) + "</div><hr>"
+          + energyLine(r.bs)
           + "<div class='lead'>Most XP per energy: <b class='x'>" + esc(r.bx.name) + "</b> &middot; Most cash per energy: <b class='c'>" + esc(r.bc.name) + "</b></div>"
+          + goldLine()
+          + (prefs.mode === "stats" ? "<div class='note'>" + (r.sw ? "Counts cash as stat points (1,500 each) and XP as levels: at level " + r.sw.L + " a level is worth about " + LV_POINTS + " stat points." : "Your level isn't known yet, so this ranks like Balanced for now.") + "</div>" : "")
           + "<table><thead><tr><th>Mission</th><th>Energy</th><th>XP/E</th><th>Cash/E</th><th>Score</th></tr></thead><tbody>";
+        var c = me(), have = c ? c.energy : null;
         list.forEach(function (m) {
           var it = m.item ? itemInfo(m.item) : null;
-          var cls = (m === r.bs ? "best" : "") + (it && it.rare ? " rare" : "");
+          var cls = (m === r.bs ? "best" : "") + (it && it.rare ? " rare" : "") + (m.gold ? " gold" : "");
+          var short = have != null && m.energy > have;
           html += "<tr class='" + cls + "'" + (it ? " style='--c:" + it.color + "'" : "") + "><td><span class='nm'>" + esc(m.name) + "</span>"
+            + (m.gold ? "<span class='gb' title='This mission also gives " + m.gold + " gold'>&#129689; +" + m.gold + " gold</span>" : "")
             + (it ? badge(it) + "<div class='item'>" + (it.img ? "<img src='" + esc(it.img) + "' alt=''>" : "") + "<span>" + esc(it.name) + "</span></div>" : "")
-            + "</td><td>" + m.energy + "</td>"
+            + "</td><td" + (short ? " class='short' title='Enough energy in " + waitText(energyReadyAt(have, m.energy) - Date.now()) + "'" : "") + ">" + m.energy + "</td>"
             + "<td class='" + (m === r.bx ? "x" : "") + "'>" + fmt(m.xpr) + "</td>"
             + "<td class='" + (m === r.bc ? "c" : "") + "'>" + fmt(m.cr) + "</td>"
             + "<td class='sc'>" + Math.round(m.score) + "</td></tr>";
@@ -665,9 +748,10 @@ kbd {
     if (closed) { return; }
     if (onPage) {
       notice = false;
-      list = readQuests().map(function (q) {
+      var quests = readQuests(), gold = goldOf(quests);
+      list = quests.map(function (q) {
         return {
-          name: nice(q.giver), giver: q.giver, energy: q.energy, xp: q.xp || 0, cash: q.cash || 0,
+          name: nice(q.giver), giver: q.giver, energy: q.energy, xp: q.xp || 0, cash: q.cash || 0, gold: +q.gold > 0 ? +q.gold : gold[q.id] || 0,
           item: q.item && q.item.id ? { id: String(q.item.id), tier: q.item.tier || "" } : null
         };
       }).filter(function (m) { return m.energy > 0; });
@@ -679,7 +763,8 @@ kbd {
       });
       if (region && region !== prefs.region) { prefs.region = region; savePrefs(); }
     }
-    var key = JSON.stringify(list) + prefs.mode + prefs.min + prefs.skin + prefs.region + notice;
+    var c = me();
+    var key = JSON.stringify(list) + prefs.mode + prefs.min + prefs.skin + prefs.region + notice + (c ? c.energy + "/" + c.xp : "");
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
