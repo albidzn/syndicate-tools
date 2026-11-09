@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Syndicate Activity Reporter
 // @namespace    syndicate-tools
-// @version      2.35.1
+// @version      2.36.0
 // @description  Leader panel on the Family tab, daily and weekly activity reports, a live leaderboard and war alerts in Discord.
 // @match        https://mafiareborn.com/*
 // @grant        none
@@ -23,9 +23,12 @@ function reporter() {
   "use strict";
   if (window.__synActivity) { return; }
   window.__synActivity = true;
-  var VERSION = "2.35.1";
+  var VERSION = "2.36.0";
   // What's new, posted to the leadership chat the first time a new version runs (see announceVersion). Add an entry with every release.
   var CHANGES = {
+    "2.36.0": [
+      "Personal panel: new 📈 Today tab with the XP, cash and gold you gained today, split by where it came from (missions, survival, wanted, police, duels, gang war and more), plus what you spent and yesterday's total. It counts while the game is open, and starts again at 00:00 UTC."
+    ],
     "2.35.1": [
       "Recruits tab opens again (2.35.0 broke it)."
     ],
@@ -3962,6 +3965,138 @@ function reporter() {
     if (s && JSON.stringify(cur) !== JSON.stringify(rememberedTimers[me.city] || {})) { rememberedTimers[me.city] = JSON.parse(JSON.stringify(cur)); save(s); }
   }
   var rememberedTimers = {};
+  // ===== Today: your own XP, cash and gold gained today =====
+  // Each time the game's player data (getMe) changes, its xp (the total, which only grows), cash and gold are compared with the last
+  // values seen, and the difference is booked to what you just did. That comes from the game itself: a finished mission (questsCompleted
+  // goes up), collected protection money (protectMoneyStartedAt changes), a fight started (its attackSurvivalFn, attackWantedFn and
+  // startDuelFn requests), a game area's data changing (gang war, butcher, family...), and otherwise the page you're on.
+  // Up is earned; cash or gold going down is spent. Fight rewards are paid when the fight is claimed, after its replay, so a hint
+  // counts for 3 minutes and the latest one wins.
+  // The last values are kept in localStorage (syn-today), shared by every open game tab, and only newer data than that is used,
+  // so two tabs never count anything twice. A change from while the game was closed is booked as "While closed", unless it spans
+  // the 00:00 UTC reset: then it can't be split between the days and is left out.
+  // syn-today = {id, last: {xp, cash, gold, q, pm, at}, days: {"YYYY-MM-DD": {from, src: {source: {xp, cash, gold}}, spent: {cash, gold}}}}.
+  var TODAY_KEY = "syn-today", TODAY_HINT = 3 * 60000, TODAY_WAIT = 1500, TODAY_DAYS = 8;
+  var todayHooked = null, todaySession = false, todayHint = { src: "", at: 0 }, todayRefs = {};
+  var TODAY_NAMES = { missions: "🎯 Missions", protection: "💰 Protection money", survival: "🛡️ Survival", wanted: "🚨 Wanted", police: "👮 Police",
+    duels: "⚔️ Duels", gangwar: "🗺️ Gang war", butcher: "🔪 Butcher", eddy: "🧊 Eddy Frost", law: "💼 Breaking the law", family: "👨‍👩‍👦 Family",
+    shops: "🛒 Shops", gang: "🧑‍🤝‍🧑 Gang", character: "💪 Character", away: "💤 While closed", other: "❔ Other" };
+  var TODAY_PATHS = { "/game/godfather": "missions", "/game/police": "police", "/game/duel": "duels", "/game/gangwar": "gangwar", "/game/shops": "shops",
+    "/game/gang": "gang", "/game/family": "family", "/game/character": "character" };
+  function todayRaw() { try { return localStorage.getItem(TODAY_KEY) || ""; } catch (e) { return ""; } }
+  function todayLoad() { var t; try { t = JSON.parse(todayRaw() || "{}"); } catch (e) { t = null; } t = t && typeof t === "object" ? t : {}; t.days = t.days || {}; return t; }
+  function todaySave(t) {
+    var keep = Object.keys(t.days).sort().slice(-TODAY_DAYS), days = {};
+    keep.forEach(function (k) { days[k] = t.days[k]; });
+    t.days = days;
+    try { localStorage.setItem(TODAY_KEY, JSON.stringify(t)); } catch (e) {}
+  }
+  function todayDay(t, k, from) {
+    if (!t.days[k]) { t.days[k] = { from: from, src: {}, spent: { cash: 0, gold: 0 } }; }
+    return t.days[k];
+  }
+  function todayMeOf(d) { return d && (typeof d.xp === "number" ? d : d.user && typeof d.user.xp === "number" ? d.user : null); }
+  // A request that tells what you're doing: a game area's data that changed (same data again doesn't count) or a fight that started.
+  function todayQuerySrc(k) {
+    var a = k[0], b = k[1];
+    if (a === "getActiveQuest") { return "missions"; }
+    if (a === "city") { return b === "gangwar" || b === "cityQuestFight" ? "gangwar" : b === "survivalReplay" ? "survival" : b === "wantedReplay" ? "wanted" : ""; }
+    return a === "butcher" ? "butcher" : a === "eddyFrost" ? "eddy" : a === "breakingTheLaw" ? "law" : a === "familyWar" || a === "familyAccount" ? "family" : "";
+  }
+  function todayMutationSrc(k) {
+    var a = String(k[0] || "");
+    return /survival/i.test(a) ? "survival" : /wanted/i.test(a) ? "wanted" : /duel/i.test(a) ? "duels" : /breakingthelaw/i.test(a) ? "law" : /eddy/i.test(a) ? "eddy" : /butcher/i.test(a) ? "butcher" : "";
+  }
+  function hookToday() {
+    if (!client) { findClient(); }
+    if (!client || todayHooked === client || typeof client.getMutationCache !== "function") { return; }
+    todayHooked = client;
+    client.getQueryCache().subscribe(function (ev) {
+      try {
+        if (!ev || ev.type !== "updated" || !ev.action || ev.action.type !== "success" || !ev.query) { return; }
+        var q = ev.query, k = q.queryKey || [];
+        if (k[0] === "getMe") { todaySeen(q); return; }
+        var src = todayQuerySrc(k);
+        if (!src || todayRefs[q.queryHash] === q.state.data) { return; }
+        todayRefs[q.queryHash] = q.state.data;
+        todayHint = { src: src, at: Date.now() };
+      } catch (e) {}
+    });
+    client.getMutationCache().subscribe(function (ev) {
+      try {
+        var m = ev && ev.mutation, k = m && m.options && m.options.mutationKey, src = k ? todayMutationSrc(k) : "";
+        if (src && ev.type === "updated" && ev.action && (ev.action.type === "pending" || ev.action.type === "success")) { todayHint = { src: src, at: Date.now() }; }
+      } catch (e) {}
+    });
+    var q = client.getQueryCache().find({ queryKey: ["getMe"] });
+    if (q) { todaySeen(q); }
+  }
+  function todaySeen(q) {
+    var me = todayMeOf(q.state.data), at = q.state.dataUpdatedAt || Date.now();
+    if (!me || me.id == null) { return; }
+    var t = todayLoad(), prev = String(t.id) === String(me.id) ? t.last : null, first = !todaySession;
+    if (prev && at <= prev.at) { return; } // older data than what's been counted already (another tab got there first)
+    todaySession = true;
+    var cur = { xp: +me.xp || 0, cash: +me.cash || 0, gold: +me.gold || 0, q: +me.questsCompleted || 0, pm: String(me.protectMoneyStartedAt || ""), at: at };
+    var k = dayKey(at);
+    t.id = me.id; t.last = cur;
+    todayDay(t, k, at);
+    var d = prev ? { xp: cur.xp - prev.xp, cash: cur.cash - prev.cash, gold: cur.gold - prev.gold } : null;
+    todaySave(t);
+    if (!d || !d.xp && !d.cash && !d.gold || dayKey(prev.at) !== k) { return; } // nothing new, or it spans the reset
+    var src = first && at - prev.at > 2 * 60000 ? "away" : cur.q > (prev.q || 0) ? "missions" : cur.pm !== (prev.pm || "") && d.cash > 0 ? "protection" : "";
+    // The game refreshes the area's data around the same time as the player data, so the hint gets a moment to arrive.
+    setTimeout(function () { todayBook(k, d, src || todaySource()); }, src ? 0 : TODAY_WAIT);
+  }
+  function todaySource() {
+    var path = location.pathname.replace(/\/+$/, ""), hint = Date.now() - todayHint.at < TODAY_HINT ? todayHint.src : "";
+    if (path === "/game/police" && hint !== "wanted") { return "police"; }
+    return hint || TODAY_PATHS[path] || "other";
+  }
+  function todayBook(k, d, src) {
+    var t = todayLoad(), day = todayDay(t, k, Date.now()), e = day.src[src] = day.src[src] || { xp: 0, cash: 0, gold: 0 };
+    ["xp", "cash", "gold"].forEach(function (f) {
+      var v = d[f] || 0;
+      if (v > 0) { e[f] += v; } else if (v < 0 && f !== "xp") { day.spent[f] += -v; }
+    });
+    todaySave(t);
+  }
+  function todaySum(day) {
+    var sum = { xp: 0, cash: 0, gold: 0 };
+    Object.keys(day && day.src || {}).forEach(function (k) { ["xp", "cash", "gold"].forEach(function (f) { sum[f] += day.src[k][f] || 0; }); });
+    return sum;
+  }
+  function todayNum(v) { return v ? Math.round(v).toLocaleString("en-US") : "<span style='color:var(--muted)'>–</span>"; }
+  function todayHtml() {
+    var me = duelMe() || todayMeOf(client && client.getQueryData && client.getQueryData(["getMe"]));
+    if (!me) { return "<div class='mqnote'>Your player data hasn't loaded yet.</div>"; }
+    var t = todayLoad(), now = Date.now(), k = dayKey(now), mine = String(t.id) === String(me.id), day = mine ? t.days[k] : null;
+    var start = Date.parse(k + "T00:00:00Z"), y = mine ? t.days[dayKey(now - DAY)] : null, h = "";
+    h += "<div class='dqhead'><span class='t grow'>Gained today</span><span>" + (day && day.from > start + 5 * 60000 ? "counting since " + clock(day.from) : "since 00:00 UTC (" + clock(start) + ")") + "</span></div>";
+    var keys = Object.keys(day && day.src || {}).filter(function (s2) { var e = day.src[s2]; return e.xp || e.cash || e.gold; });
+    if (!keys.length) {
+      h += "<div class='nomatch'>Nothing gained yet today. Finish a mission, a survival or a fight and it shows up here.</div>";
+    } else {
+      keys.sort(function (a, b) { return day.src[b].xp - day.src[a].xp || day.src[b].cash - day.src[a].cash; });
+      var sum = todaySum(day);
+      h += "<table class='dq'><thead><tr><th style='text-align:left'>From</th><th>XP</th><th>Cash</th><th>Gold</th></tr></thead><tbody>";
+      keys.forEach(function (s2) {
+        var e = day.src[s2];
+        h += "<tr><td class='nm2' style='text-align:left'>" + esc(TODAY_NAMES[s2] || s2) + "</td><td>" + todayNum(e.xp) + "</td><td>" + todayNum(e.cash) + "</td><td>" + todayNum(e.gold) + "</td></tr>";
+      });
+      h += "<tr style='font-weight:700'><td style='text-align:left'>Total</td><td>" + todayNum(sum.xp) + "</td><td>" + todayNum(sum.cash) + "</td><td>" + todayNum(sum.gold) + "</td></tr></tbody></table>";
+    }
+    if (day && (day.spent.cash || day.spent.gold)) {
+      h += "<div class='mqnote'>Spent today: " + [day.spent.cash ? day.spent.cash.toLocaleString("en-US") + " cash" : "", day.spent.gold ? day.spent.gold.toLocaleString("en-US") + " gold" : ""].filter(Boolean).join(" · ") + "</div>";
+    }
+    if (y) {
+      var ys = todaySum(y);
+      h += "<div class='mqnote'>Yesterday: " + ys.xp.toLocaleString("en-US") + " XP · " + ys.cash.toLocaleString("en-US") + " cash · " + ys.gold.toLocaleString("en-US") + " gold" + (y.from > Date.parse(dayKey(now - DAY) + "T00:00:00Z") + 5 * 60000 ? " (from " + clock(y.from) + ")" : "") + "</div>";
+    }
+    h += "<div class='mqnote'>Counted on this PC while the game is open. If the game was closed, what came in meanwhile shows as While closed. Starts again at 00:00 UTC.</div>";
+    return h;
+  }
+
   function timersHtml(s) {
     var me = duelMe(), now = Date.now(), h = "";
     if (!me) { return "<div class='mqnote'>Your player data hasn't loaded yet.</div>"; }
@@ -4300,10 +4435,10 @@ function reporter() {
     }
     html += alertHtml(s) + missionBarHtml();
     if (area === "personal") {
-      html += "<div class='tabs'>" + [["missions", "🎯 Missions"], ["duels", "⚔️ Duels"], ["gang", "🗺️ Gang war"], ["timers", "⏱ Timers"]].map(function (o) {
+      html += "<div class='tabs'>" + [["missions", "🎯 Missions"], ["duels", "⚔️ Duels"], ["gang", "🗺️ Gang war"], ["timers", "⏱ Timers"], ["today", "📈 Today"]].map(function (o) {
         return "<button type='button' data-ptab='" + o[0] + "'" + (personalTab === o[0] ? " class='on'" : "") + ">" + o[1] + "</button>";
       }).join("") + "</div>";
-      box.innerHTML = html + (personalTab === "duels" ? duelHtml(s) : personalTab === "gang" ? gangHtml(s) : personalTab === "timers" ? timersHtml(s) : missionHtml()) + "<div class='ver'>Activity v" + VERSION + "</div>";
+      box.innerHTML = html + (personalTab === "duels" ? duelHtml(s) : personalTab === "gang" ? gangHtml(s) : personalTab === "timers" ? timersHtml(s) : personalTab === "today" ? todayHtml() : missionHtml()) + "<div class='ver'>Activity v" + VERSION + "</div>";
       place(); tipTitles();
       return;
     }
@@ -5878,6 +6013,7 @@ function reporter() {
     trackFamXp();
     learnDuels();
     rememberTimers();
+    hookToday();
     fxTick();
     // The docked panel stays on every game page; a floating one (too little room, or dragged away) only shows on the Family tab, the bar and the duel page.
     if (closed || path !== PAGE && path !== BAR && path !== DUELS && !(/^\/game(\/|$)/.test(path) && wouldDock())) { if (box) { box.remove(); box = null; tipX = -1; showTip(); } setDock(0); lastKey = ""; return; }
@@ -5887,7 +6023,7 @@ function reporter() {
     if (showLinks && box && document.body.contains(box) && lastKey) { return; } // nor unsaved links while that list is open
     var s = load(); delete s.seen; delete s.lock; delete s.pos; delete s.hist; delete s.recruitHist; delete s.boardLock; delete s.weekLock;
     var key = JSON.stringify(last && last.fam.members) + JSON.stringify(last && warsOf(last.fam)) + JSON.stringify(s) + sending + error + note + diag
-      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + showExtras + memberFilter + trendId + area + personalTab + missionState() + (area === "personal" && personalTab === "missions" ? missionKey() : "") + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
+      + warBusy + warError + boardBusy + boardError + lvError + apError + JSON.stringify(fails) + JSON.stringify(last && famProgress(last.fam)) + showSetup + showLinks + showPlanner + showRecruits + showRanks + showVol + showExtras + memberFilter + trendId + area + personalTab + missionState() + (area === "personal" && personalTab === "missions" ? missionKey() : "") + (area === "personal" && personalTab === "today" ? todayRaw() : "") + duelRange + duelFilter + duelSort + JSON.stringify(duelState) + JSON.stringify(gangState) + JSON.stringify(learnState) + JSON.stringify(adviceState) + JSON.stringify(missions) + mqMode() + copied + JSON.stringify(scanning) + JSON.stringify(recruiting) + city() + Math.floor(Date.now() / 60000);
     if (box && document.body.contains(box) && key === lastKey) { return; }
     lastKey = key;
     draw();
